@@ -1,0 +1,47 @@
+name: rescue_link
+description: AI-powered offline mesh emergency app for GDG Solution Challenge 2026
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+# Enable Dart experiments
+dart: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Firebase
+  firebase_core: ^4.6.0
+  firebase_auth: ^6.3.0
+  cloud_firestore: ^6.2.0
+  
+  # Maps & Location
+  google_maps_flutter: ^2.9.0
+  geolocator: ^14.0.2
+  
+  # Gemini AI
+  google_generative_ai: ^0.4.7
+  
+  # Utils
+  permission_handler: ^12.0.1
+  provider: ^6.1.2
+  uuid: ^4.5.0
+  
+  # Nice UI extras (optional but recommended)
+  fluttertoast: ^9.0.0
+  haptic_feedback: 0.6.4+3   # for SOS vibration
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/   # we'll create this folder later if needed

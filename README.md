@@ -1,4 +1,4 @@
-# RapidLink
+# RescueLink
 
 **Connecting help when it matters most**  
 AI-powered emergency mesh network for Rapid Crisis Response.

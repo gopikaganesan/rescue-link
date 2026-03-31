@@ -6,6 +6,8 @@
 *.swp
 .buildlog/
 .history
+.idea/
+*.iml
 
 
 
@@ -103,6 +105,10 @@ unlinked_spec.ds
 **/linux/flutter/generated_plugin_registrant.cc
 **/linux/flutter/generated_plugin_registrant.h
 **/linux/flutter/generated_plugins.cmake
+
+# Firebase config secrets
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
 
 # Coverage
 coverage/
