@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../core/providers/auth_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
+import 'responder_registration_screen.dart';
 import '../widgets/sos_button.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -115,6 +116,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _openResponderRegistration() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ResponderRegistrationScreen(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -148,6 +157,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _openResponderRegistration,
+                        icon: const Icon(Icons.health_and_safety),
+                        label: const Text('Become A Responder'),
                       ),
                     ),
                     const SizedBox(height: 20),
