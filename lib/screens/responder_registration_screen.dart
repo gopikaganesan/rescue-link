@@ -78,7 +78,7 @@ class _ResponderRegistrationScreenState
       registeredAt: DateTime.now(),
     );
 
-    responderProvider.addResponder(responder);
+    await responderProvider.addResponder(responder);
     authProvider.registerAsResponder();
 
     if (!mounted) {
