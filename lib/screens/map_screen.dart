@@ -20,33 +20,24 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeMap();
+    // Don't initialize map here, wait for onMapCreated callback
   }
 
   /// Initialize map markers and circles
-  void _initializeMap() {
-    final locationProvider = context.read<LocationProvider>();
-    final responderProvider = context.read<ResponderProvider>();
+  void _initializeMap(double userLat, double userLng,
+      List<ResponderModel> responders) {
+    // Clear existing markers and circles
+    _markers.clear();
+    _circles.clear();
 
-    if (!locationProvider.hasLocation) {
-      return;
-    }
-
-    _addUserMarker(
-      locationProvider.latitude!,
-      locationProvider.longitude!,
-    );
-
-    _addResponderMarkers(responderProvider.nearbyResponders);
+    _addUserMarker(userLat, userLng);
+    _addResponderMarkers(responders, userLat, userLng);
 
     // Add 5km circle around user
     _circles.add(
       Circle(
         circleId: const CircleId('search_radius'),
-        center: LatLng(
-          locationProvider.latitude!,
-          locationProvider.longitude!,
-        ),
+        center: LatLng(userLat, userLng),
         radius: 5000, // 5km in meters
         fillColor: Colors.blue.withOpacity(0.1),
         strokeColor: Colors.blue.withOpacity(0.5),
@@ -73,7 +64,8 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   /// Add responder markers (red/orange)
-  void _addResponderMarkers(List<ResponderModel> responders) {
+  void _addResponderMarkers(List<ResponderModel> responders, double userLat,
+      double userLng) {
     for (int i = 0; i < responders.length; i++) {
       final responder = responders[i];
       _markers.add(
@@ -83,10 +75,7 @@ class _MapScreenState extends State<MapScreen> {
           infoWindow: InfoWindow(
             title: responder.name,
             snippet:
-                '${responder.skillsArea} • ${(responder.distanceToLocation(
-                      context.read<LocationProvider>().latitude!,
-                      context.read<LocationProvider>().longitude!,
-                    )).toStringAsFixed(1)} km away',
+                '${responder.skillsArea} • ${responder.distanceToLocation(userLat, userLng).toStringAsFixed(1)} km away',
           ),
           icon: BitmapDescriptor.defaultMarkerWithHue(
             BitmapDescriptor.hueRed,
@@ -148,7 +137,13 @@ class _MapScreenState extends State<MapScreen> {
               GoogleMap(
                 onMapCreated: (controller) {
                   _mapController = controller;
-                  _initializeMap();
+                  // Initialize markers after map is created
+                  _initializeMap(
+                    locationProvider.latitude!,
+                    locationProvider.longitude!,
+                    responderProvider.nearbyResponders,
+                  );
+                  setState(() {});
                 },
                 initialCameraPosition: CameraPosition(
                   target: LatLng(

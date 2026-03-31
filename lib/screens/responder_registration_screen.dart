@@ -155,7 +155,7 @@ class _ResponderRegistrationScreenState
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: _selectedSkill,
+                  initialValue: _selectedSkill,
                   decoration: const InputDecoration(
                     labelText: 'Primary Skill',
                     border: OutlineInputBorder(),

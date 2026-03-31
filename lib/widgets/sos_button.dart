@@ -6,10 +6,10 @@ class SOSButton extends StatefulWidget {
   final bool isLoading;
 
   const SOSButton({
-    Key? key,
+    super.key,
     required this.onPressed,
     this.isLoading = false,
-  }) : super(key: key);
+  });
 
   @override
   State<SOSButton> createState() => _SOSButtonState();
