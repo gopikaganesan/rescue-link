@@ -1,6 +1,6 @@
 # RapidLink
 
-**Fast help when networks fail**  
+**Connecting help when it matters most**  
 AI-powered emergency mesh network for Rapid Crisis Response.
 
 ## About
