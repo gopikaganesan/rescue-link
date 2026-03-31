@@ -4,6 +4,7 @@ import '../core/providers/auth_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import 'responder_registration_screen.dart';
+import 'map_screen.dart';
 import '../widgets/sos_button.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -73,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('🚨 SOS Activated'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -98,8 +99,16 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Close'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _openMap();
+            },
+            icon: const Icon(Icons.map),
+            label: const Text('View Map'),
           ),
         ],
       ),
@@ -124,6 +133,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _openMap() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const MapScreen(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -132,6 +149,13 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
         elevation: 0,
         backgroundColor: Colors.red.shade700,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.map),
+            onPressed: _openMap,
+            tooltip: 'View responders map',
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         child: SizedBox(
