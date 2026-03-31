@@ -22,11 +22,8 @@ class RescueLinkApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        // Auth Provider
         ChangeNotifierProvider(create: (_) => AuthProvider()),
-        // Location Provider
         ChangeNotifierProvider(create: (_) => LocationProvider()),
-        // Responder Provider
         ChangeNotifierProvider(create: (_) => ResponderProvider()),
       ],
       child: MaterialApp(
@@ -63,7 +60,6 @@ class RescueLinkApp extends StatelessWidget {
   }
 }
 
-/// Wrapper that routes to appropriate screen based on auth state
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
@@ -71,12 +67,10 @@ class AuthWrapper extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<AuthProvider>(
       builder: (context, authProvider, _) {
-        // For MVP, we'll simulate login and go straight to home
         if (authProvider.isAuthenticated && authProvider.currentUser != null) {
           return const HomeScreen();
         }
 
-        // Auto-login for MVP (remove this in production)
         WidgetsBinding.instance.addPostFrameCallback((_) {
           authProvider.login('user@rescuelink.com', 'password');
         });
