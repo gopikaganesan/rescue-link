@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/providers/auth_provider.dart';
+import '../core/providers/crisis_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import 'responder_registration_screen.dart';
@@ -33,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Handle SOS button press
   Future<void> _handleSOSPress() async {
     final authProvider = context.read<AuthProvider>();
+    final crisisProvider = context.read<CrisisProvider>();
     final locationProvider =
         context.read<LocationProvider>();
     final responderProvider =
@@ -44,10 +46,26 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (locationProvider.hasLocation && authProvider.currentUser != null) {
+      await responderProvider.fetchResponders();
+
       // Update user location
       authProvider.updateUserLocation(
         locationProvider.latitude!,
         locationProvider.longitude!,
+      );
+
+      final aiInput =
+          'SOS triggered by ${authProvider.currentUser!.displayName} near '
+          '${locationProvider.latitude!.toStringAsFixed(4)}, '
+          '${locationProvider.longitude!.toStringAsFixed(4)}. '
+          'Potential emergency needs urgent support.';
+
+      await crisisProvider.classifyCrisis(
+        aiInput,
+        availableSkills: responderProvider.responders
+            .map((responder) => responder.skillsArea)
+            .toSet()
+            .toList(),
       );
 
       // Find nearby responders within 5km
@@ -55,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
         locationProvider.latitude!,
         locationProvider.longitude!,
         5.0, // 5km radius
+        requiredSkill: crisisProvider.latestAnalysis?.recommendedSkill,
       );
 
       // Show SOS confirmation
@@ -66,10 +85,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Show SOS confirmation dialog
   void _showSOSConfirmation() {
+    final crisisProvider = context.read<CrisisProvider>();
     final locationProvider =
         context.read<LocationProvider>();
     final responderProvider =
         context.read<ResponderProvider>();
+    final analysis = crisisProvider.latestAnalysis;
 
     showDialog(
       context: context,
@@ -95,6 +116,29 @@ class _HomeScreenState extends State<HomeScreen> {
               'Nearby Responders: ${responderProvider.nearbyResponders.length}',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
+            if (analysis != null) ...[
+              const SizedBox(height: 16),
+              Text(
+                'AI Category: ${analysis.category}',
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              Text(
+                'Severity: ${analysis.severity}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                'Suggested Skill: ${analysis.recommendedSkill}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              if (analysis.offlineMode)
+                Text(
+                  'AI Mode: Offline Fallback',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.orange[800]),
+                ),
+            ],
           ],
         ),
         actions: [

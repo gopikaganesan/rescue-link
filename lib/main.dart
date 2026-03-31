@@ -3,8 +3,10 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'core/providers/auth_provider.dart';
+import 'core/providers/crisis_provider.dart';
 import 'core/providers/location_provider.dart';
 import 'core/providers/responder_provider.dart';
+import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 
 void main() async {
@@ -23,6 +25,7 @@ class RescueLinkApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => CrisisProvider()),
         ChangeNotifierProvider(create: (_) => LocationProvider()),
         ChangeNotifierProvider(create: (_) => ResponderProvider()),
       ],
@@ -71,15 +74,15 @@ class AuthWrapper extends StatelessWidget {
           return const HomeScreen();
         }
 
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          authProvider.login('user@rescuelink.com', 'password');
-        });
+        if (authProvider.isLoading) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
 
-        return const Scaffold(
-          body: Center(
-            child: CircularProgressIndicator(),
-          ),
-        );
+        return const AuthScreen();
       },
     );
   }

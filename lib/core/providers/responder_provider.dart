@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/responder_model.dart';
 
 /// Manages nearby responders and matching logic
 class ResponderProvider extends ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   List<ResponderModel> _responders = [];
   List<ResponderModel> _nearbyResponders = [];
   bool _isLoading = false;
@@ -21,9 +24,13 @@ class ResponderProvider extends ChangeNotifier {
       _error = null;
       notifyListeners();
 
-      // TODO: Replace with actual Firestore fetch
-      // For now, simulating with empty list
-      _responders = [];
+      final snapshot = await _firestore.collection('responders').get();
+      _responders = snapshot.docs
+          .map((doc) => ResponderModel.fromMap(<String, dynamic>{
+                ...doc.data(),
+                'id': doc.id,
+              }))
+          .toList();
       _isLoading = false;
     } catch (e) {
       _error = 'Error fetching responders: ${e.toString()}';
@@ -33,10 +40,20 @@ class ResponderProvider extends ChangeNotifier {
   }
 
   /// Find nearby responders within radius (km)
-  void findNearbyResponders(double userLat, double userLng, double radiusKm) {
+  void findNearbyResponders(
+    double userLat,
+    double userLng,
+    double radiusKm, {
+    String? requiredSkill,
+  }) {
+    final skillQuery = requiredSkill?.trim().toLowerCase();
+
     _nearbyResponders = _responders
         .where((responder) =>
             responder.isAvailable &&
+            (skillQuery == null ||
+                skillQuery.isEmpty ||
+                responder.skillsArea.toLowerCase().contains(skillQuery)) &&
             responder.distanceToLocation(userLat, userLng) <= radiusKm)
         .toList();
 
@@ -49,9 +66,16 @@ class ResponderProvider extends ChangeNotifier {
   }
 
   /// Add responder (for registration)
-  void addResponder(ResponderModel responder) {
+  Future<bool> addResponder(ResponderModel responder) async {
+    try {
+      await _firestore.collection('responders').doc(responder.id).set(responder.toMap());
+    } catch (e) {
+      _error = 'Firestore unavailable, saved locally: ${e.toString()}';
+    }
+
     _responders.add(responder);
     notifyListeners();
+    return true;
   }
 
   /// Simulate adding responders for testing

@@ -1,3 +1,7 @@
+import 'dart:math' as math;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class ResponderModel {
   final String id;
   final String userId;
@@ -26,12 +30,12 @@ class ResponderModel {
     const double earthRadiusKm = 6371.0;
     final double dLat = _toRad(lat - latitude);
     final double dLng = _toRad(lng - longitude);
-    final double a = (Math.sin(dLat / 2) * Math.sin(dLat / 2)) +
-        (Math.cos(_toRad(latitude)) *
-            Math.cos(_toRad(lat)) *
-            Math.sin(dLng / 2) *
-            Math.sin(dLng / 2));
-    final double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    final double a = (math.sin(dLat / 2) * math.sin(dLat / 2)) +
+        (math.cos(_toRad(latitude)) *
+            math.cos(_toRad(lat)) *
+            math.sin(dLng / 2) *
+            math.sin(dLng / 2));
+    final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     return earthRadiusKm * c;
   }
 
@@ -54,6 +58,14 @@ class ResponderModel {
   }
 
   factory ResponderModel.fromMap(Map<String, dynamic> map) {
+    final dynamic registeredAtRaw = map['registeredAt'];
+    DateTime parsedRegisteredAt = DateTime.now();
+    if (registeredAtRaw is Timestamp) {
+      parsedRegisteredAt = registeredAtRaw.toDate();
+    } else if (registeredAtRaw is DateTime) {
+      parsedRegisteredAt = registeredAtRaw;
+    }
+
     return ResponderModel(
       id: (map['id'] as String?) ?? '',
       userId: (map['userId'] as String?) ?? '',
@@ -63,7 +75,7 @@ class ResponderModel {
       latitude: (map['latitude'] as num?)?.toDouble() ?? 0.0,
       longitude: (map['longitude'] as num?)?.toDouble() ?? 0.0,
       isAvailable: (map['isAvailable'] as bool?) ?? true,
-      registeredAt: (map['registeredAt'] as DateTime?) ?? DateTime.now(),
+      registeredAt: parsedRegisteredAt,
     );
   }
 
@@ -90,12 +102,4 @@ class ResponderModel {
       registeredAt: registeredAt ?? this.registeredAt,
     );
   }
-}
-
-// Math utility (since dart:math might not be imported)
-class Math {
-  static double sin(double value) => (value * 180 / 3.14159265359).toDouble();
-  static double cos(double value) => (value * 180 / 3.14159265359).toDouble();
-  static double sqrt(double value) => value * value;
-  static double atan2(double y, double x) => (y / x);
 }
