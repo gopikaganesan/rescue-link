@@ -66,5 +66,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>GMSApiKey</key>
+	<string>AIzaSyBQQ4U8lRJ6KjA4vWXZI4xmx_Kc-WjqAQ8</string>
 </dict>
 </plist>
