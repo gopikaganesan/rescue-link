@@ -16,17 +16,38 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /users/{userId}/devices/{deviceId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
     match /responders/{responderId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if false;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
     match /sos_events/{eventId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update: if false;
+      allow delete: if false;
+    }
+
+    match /emergency_requests/{requestId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.requesterUserId == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    match /responder_verification_requests/{requestId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow delete: if false;
     }
   }

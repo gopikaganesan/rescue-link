@@ -13,14 +13,23 @@ Built with **Flutter + Firebase + Gemini** for GDG on Campus CIT Solution Challe
 - Universal accessible SOS (tap, shake, voice, icons)
 - Gemini AI emergency classification & resource allocation
 - Helper/Responder registration (anyone can register skills/capacity)
-- Offline Mesh Mode (simulated)
+- Offline Mesh + Satellite Mode (simulated fallback)
 - Nearby map of resources
+- Role-aware responder notifications (skill + responder type + distance)
+- Emergency fallback actions (call/SMS 112) when no nearby responders
 
 ## Tech Stack
 - Flutter
 - Firebase (Auth, Firestore, Cloud Messaging)
 - Gemini API
-- Google Maps (optional)
+- Flutter Map (OpenStreetMap tiles)
+
+## Docs
+- [docs/START_HERE_CHECKLIST.md](docs/START_HERE_CHECKLIST.md)
+- [docs/GDG_INDIA_2026_ALIGNMENT.md](docs/GDG_INDIA_2026_ALIGNMENT.md)
+- [docs/SETUP_KEYS.md](docs/SETUP_KEYS.md)
+- [docs/SIMULATION_MODES.md](docs/SIMULATION_MODES.md)
+- [functions/README.md](functions/README.md)
 
 ## Submission
 - Demo Video: [Paste link here]

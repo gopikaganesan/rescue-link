@@ -1,36 +1,62 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:math' as math;
 
 class SOSButton extends StatefulWidget {
-  final VoidCallback onPressed;
+  final Future<void> Function() onPressed;
   final bool isLoading;
+  final bool enableHaptics;
 
   const SOSButton({
     super.key,
     required this.onPressed,
     this.isLoading = false,
+    this.enableHaptics = true,
   });
 
   @override
   State<SOSButton> createState() => _SOSButtonState();
 }
 
-class _SOSButtonState extends State<SOSButton> {
+class _SOSButtonState extends State<SOSButton>
+    with SingleTickerProviderStateMixin {
   bool _isPressed = false;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat();
+
+    _pulseAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   void _handlePress() async {
-    // Haptic feedback - strong vibration
-    try {
-      HapticFeedback.heavyImpact();
-    } catch (e) {
-      // Silently fail if haptic not available
+    if (widget.enableHaptics) {
+      try {
+        HapticFeedback.heavyImpact();
+      } catch (e) {
+        // Silently fail if haptic not available
+      }
     }
 
     setState(() => _isPressed = true);
-    widget.onPressed();
+    await widget.onPressed();
 
     // Visual feedback - reset after animation
-    await Future.delayed(const Duration(milliseconds: 300));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
     if (mounted) {
       setState(() => _isPressed = false);
     }
@@ -38,96 +64,164 @@ class _SOSButtonState extends State<SOSButton> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        boxShadow: [
-          BoxShadow(
-            color: Colors.red.withOpacity(0.5),
-            blurRadius: 20,
-            spreadRadius: 5,
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: widget.isLoading ? null : _handlePress,
-          splashColor: Colors.red.shade900,
-          customBorder: const CircleBorder(),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            height: _isPressed ? 140 : 150,
-            width: _isPressed ? 140 : 150,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.red.shade600,
-              border: Border.all(
-                color: Colors.red.shade900,
-                width: 3,
-              ),
-              boxShadow: [
-                if (!_isPressed)
-                  BoxShadow(
-                    color: Colors.red.withOpacity(0.4),
-                    blurRadius: 15,
-                    spreadRadius: 3,
-                  ),
-              ],
-            ),
-            child: Stack(
+    return Semantics(
+      button: true,
+      enabled: !widget.isLoading,
+      label: 'Emergency SOS button',
+      hint: 'Tap to alert nearby responders. Long press to cancel.',
+      child: GestureDetector(
+        onTap: widget.isLoading ? null : _handlePress,
+        child: AnimatedBuilder(
+          animation: _pulseAnimation,
+          builder: (context, child) {
+            return Stack(
               alignment: Alignment.center,
               children: [
-                // Pulsing ring effect (when not pressed)
+                // Outer pulsing rings
                 if (!widget.isLoading && !_isPressed)
                   Positioned.fill(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.red.shade400.withOpacity(0.6),
-                          width: 2,
+                    child: CustomPaint(
+                      painter: PulseRingPainter(
+                        progress: _pulseAnimation.value,
+                        color: Colors.red.shade600,
+                      ),
+                    ),
+                  ),
+                // Main button
+                Container(
+                  decoration: BoxDecoration(
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.red.withValues(alpha: 0.6),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: widget.isLoading ? null : _handlePress,
+                      splashColor: Colors.red.shade900,
+                      customBorder: const CircleBorder(),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        height: _isPressed ? 140 : 150,
+                        width: _isPressed ? 140 : 150,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.red.shade500,
+                              Colors.red.shade700,
+                            ],
+                          ),
+                          border: Border.all(
+                            color: Colors.red.shade900,
+                            width: 3,
+                          ),
+                          boxShadow: [
+                            if (!_isPressed)
+                              BoxShadow(
+                                color: Colors.red.withValues(alpha: 0.4),
+                                blurRadius: 15,
+                                spreadRadius: 3,
+                              ),
+                          ],
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Loading indicator
+                            if (widget.isLoading)
+                              Positioned.fill(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    valueColor:
+                                        AlwaysStoppedAnimation<Color>(
+                                      Colors.white.withValues(alpha: 0.8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            // SOS Text
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'SOS',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineMedium
+                                      ?.copyWith(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 2,
+                                      ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'TAP',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.9),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
-                // Center content
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (widget.isLoading)
-                      const SizedBox(
-                        height: 35,
-                        width: 35,
-                        child: CircularProgressIndicator(
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
-                          strokeWidth: 3,
-                        ),
-                      )
-                    else ...[
-                      Icon(
-                        Icons.emergency,
-                        color: Colors.white,
-                        size: _isPressed ? 50 : 60,
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        'SOS',
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: _isPressed ? 18 : 20,
-                        ),
-                      ),
-                    ],
-                  ],
                 ),
               ],
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
+  }
+}
+
+class PulseRingPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  PulseRingPainter({
+    required this.progress,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2;
+
+    // Draw multiple rings with decreasing opacity
+    for (int i = 3; i >= 1; i--) {
+      final ringRadius = radius + (radius * progress * i);
+      final opacity = (1 - progress) * (1 / i);
+
+      final paint = Paint()
+        ..color = color.withValues(alpha: opacity * 0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+
+      canvas.drawCircle(center, ringRadius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(PulseRingPainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }

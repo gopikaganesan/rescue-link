@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -7,6 +9,8 @@ class LocationProvider extends ChangeNotifier {
   double? _longitude;
   bool _isLoading = false;
   String? _error;
+  ServiceStatus? _serviceStatus;
+  StreamSubscription<ServiceStatus>? _serviceStatusSubscription;
 
   // Getters
   double? get latitude => _latitude;
@@ -14,6 +18,24 @@ class LocationProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasLocation => _latitude != null && _longitude != null;
+  bool get isServiceEnabled => _serviceStatus == ServiceStatus.enabled;
+
+  Future<void> init() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    _serviceStatus =
+      serviceEnabled ? ServiceStatus.enabled : ServiceStatus.disabled;
+    _serviceStatusSubscription ??=
+        Geolocator.getServiceStatusStream().listen((status) async {
+      _serviceStatus = status;
+      if (status == ServiceStatus.enabled) {
+        await refreshLocationStatus(fetchLocation: true);
+      } else {
+        _error = 'Location services are disabled. Please turn on GPS.';
+      }
+      notifyListeners();
+    });
+    notifyListeners();
+  }
 
   /// Request permission and get current location
   Future<bool> requestLocationPermission() async {
@@ -21,6 +43,18 @@ class LocationProvider extends ChangeNotifier {
       _isLoading = true;
       _error = null;
       notifyListeners();
+
+      await init();
+
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      _serviceStatus =
+          serviceEnabled ? ServiceStatus.enabled : ServiceStatus.disabled;
+      if (!serviceEnabled) {
+        _error = 'Location services are disabled. Please turn on GPS.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
 
       final permission = await Geolocator.checkPermission();
       LocationPermission finalPermission = permission;
@@ -36,6 +70,13 @@ class LocationProvider extends ChangeNotifier {
         return false;
       }
 
+      if (finalPermission == LocationPermission.denied) {
+        _error = 'Location permission denied. Please allow location access.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
       await getCurrentLocation();
       return hasLocation;
     } catch (e) {
@@ -46,6 +87,49 @@ class LocationProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> refreshLocationStatus({bool fetchLocation = false}) async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    _serviceStatus =
+        serviceEnabled ? ServiceStatus.enabled : ServiceStatus.disabled;
+    if (!serviceEnabled) {
+      _error = 'Location services are disabled. Please turn on GPS.';
+      notifyListeners();
+      return false;
+    }
+
+    final permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      _error = 'Location permission denied. Please allow location access.';
+      notifyListeners();
+      return false;
+    }
+    if (permission == LocationPermission.deniedForever) {
+      _error = 'Location permissions are permanently denied';
+      notifyListeners();
+      return false;
+    }
+
+    _error = null;
+    notifyListeners();
+
+    if (fetchLocation) {
+      await getCurrentLocation();
+    }
+    return true;
+  }
+
+  Future<bool> openLocationSettings() async {
+    final opened = await Geolocator.openLocationSettings();
+    await refreshLocationStatus(fetchLocation: true);
+    return opened;
+  }
+
+  Future<bool> openPermissionSettings() async {
+    final opened = await Geolocator.openAppSettings();
+    await refreshLocationStatus(fetchLocation: true);
+    return opened;
+  }
+
   /// Get current location
   Future<void> getCurrentLocation() async {
     try {
@@ -53,9 +137,17 @@ class LocationProvider extends ChangeNotifier {
       _error = null;
       notifyListeners();
 
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        _latitude = lastKnown.latitude;
+        _longitude = lastKnown.longitude;
+      }
+
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 10),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 5),
+        ),
       );
 
       _latitude = position.latitude;
@@ -83,5 +175,11 @@ class LocationProvider extends ChangeNotifier {
     _longitude = null;
     _error = null;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _serviceStatusSubscription?.cancel();
+    super.dispose();
   }
 }
