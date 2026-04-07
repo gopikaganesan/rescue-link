@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/providers/app_settings_provider.dart';
 import '../core/providers/auth_provider.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  final bool showGuestButton;
+
+  const AuthScreen({
+    super.key,
+    this.showGuestButton = true,
+  });
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -13,6 +19,7 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _displayNameController = TextEditingController();
 
@@ -21,6 +28,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void dispose() {
     _emailController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
     _displayNameController.dispose();
     super.dispose();
@@ -39,6 +47,7 @@ class _AuthScreenState extends State<AuthScreen> {
         _emailController.text.trim(),
         _displayNameController.text.trim(),
         _passwordController.text.trim(),
+        phoneNumber: _phoneController.text.trim(),
       );
     } else {
       success = await authProvider.login(
@@ -51,6 +60,13 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
+    if (success) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+
     if (!success && authProvider.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(authProvider.error!)),
@@ -58,10 +74,48 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  void _showLanguagePicker() {
+    final settings = context.read<AppSettingsProvider>();
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) {
+        return ListView(
+          shrinkWrap: true,
+          children: settings.availableLanguageCodes
+              .map(
+                (code) => RadioListTile<String>(
+                  value: code,
+                  groupValue: settings.languageCode,
+                  title: Text(settings.languageLabel(code)),
+                  onChanged: (value) {
+                    if (value != null) {
+                      settings.setLanguage(value);
+                    }
+                    Navigator.of(sheetContext).pop();
+                  },
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<AppSettingsProvider>();
+
     return Scaffold(
-      appBar: AppBar(title: const Text('RescueLink Sign In')),
+      appBar: AppBar(
+        title: Text(settings.t('sign_in_title')),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.language),
+            onPressed: _showLanguagePicker,
+            tooltip: settings.t('language'),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -81,19 +135,32 @@ class _AuthScreenState extends State<AuthScreen> {
                     if (_isRegisterMode)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: TextFormField(
-                          controller: _displayNameController,
-                          decoration: const InputDecoration(
-                            labelText: 'Display Name',
-                            border: OutlineInputBorder(),
-                          ),
-                          validator: (value) {
-                            if (_isRegisterMode &&
-                                (value == null || value.trim().isEmpty)) {
-                              return 'Enter your display name';
-                            }
-                            return null;
-                          },
+                        child: Column(
+                          children: [
+                            TextFormField(
+                              controller: _displayNameController,
+                              decoration: const InputDecoration(
+                                labelText: 'Display Name',
+                                border: OutlineInputBorder(),
+                              ),
+                              validator: (value) {
+                                if (_isRegisterMode &&
+                                    (value == null || value.trim().isEmpty)) {
+                                  return 'Enter your display name';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            TextFormField(
+                              controller: _phoneController,
+                              keyboardType: TextInputType.phone,
+                              decoration: const InputDecoration(
+                                labelText: 'Phone Number (optional, used for responder auto-fill)',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     TextFormField(
@@ -139,7 +206,9 @@ class _AuthScreenState extends State<AuthScreen> {
                                 width: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : Text(_isRegisterMode ? 'Create Account' : 'Sign In'),
+                            : Text(_isRegisterMode
+                                ? settings.t('create_account')
+                                : settings.t('sign_in')),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -157,14 +226,31 @@ class _AuthScreenState extends State<AuthScreen> {
                             : 'Need an account? Create one',
                       ),
                     ),
-                    const Divider(height: 24),
-                    OutlinedButton.icon(
-                      onPressed: authProvider.isLoading
-                          ? null
-                          : () => authProvider.ensureAuthenticated(),
-                      icon: const Icon(Icons.person_outline),
-                      label: const Text('Continue as Guest (Anonymous)'),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Phone OTP login is currently disabled in this build to avoid billing dependency. Register with email and optional phone number.',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Colors.grey[700]),
                     ),
+                    const Divider(height: 24),
+                    if (widget.showGuestButton)
+                      OutlinedButton.icon(
+                        onPressed: authProvider.isLoading
+                            ? null
+                            : () async {
+                                final success =
+                                    await authProvider.ensureAuthenticated();
+                                if (!success && mounted && authProvider.error != null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(authProvider.error!)),
+                                  );
+                                }
+                              },
+                        icon: const Icon(Icons.person_outline),
+                        label: Text(settings.t('continue_guest')),
+                      ),
                   ],
                 ),
               );

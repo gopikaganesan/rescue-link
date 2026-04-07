@@ -1,21 +1,65 @@
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/models/responder_model.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  final double? targetLatitude;
+  final double? targetLongitude;
+  final String? targetTitle;
+
+  const MapScreen({
+    super.key,
+    this.targetLatitude,
+    this.targetLongitude,
+    this.targetTitle,
+  });
 
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
 
 class _MapScreenState extends State<MapScreen> {
-  late GoogleMapController _mapController;
-  final Set<Marker> _markers = {};
-  final Set<Circle> _circles = {};
+  final MapController _mapController = MapController();
+
+  IconData _iconForSkill(String skill) {
+    final normalized = skill.toLowerCase();
+    if (normalized.contains('medical')) return Icons.medical_services;
+    if (normalized.contains('fire')) return Icons.local_fire_department;
+    if (normalized.contains('search') || normalized.contains('rescue')) {
+      return Icons.travel_explore;
+    }
+    if (normalized.contains('shelter') || normalized.contains('evacuation')) {
+      return Icons.home;
+    }
+    if (normalized.contains('food') || normalized.contains('water')) {
+      return Icons.restaurant;
+    }
+    if (normalized.contains('women')) return Icons.shield;
+    if (normalized.contains('child') || normalized.contains('kid')) {
+      return Icons.child_care;
+    }
+    if (normalized.contains('elderly')) return Icons.elderly;
+    if (normalized.contains('communication')) return Icons.wifi_tethering;
+    return Icons.support_agent;
+  }
+
+  Color _colorForSkill(String skill) {
+    final normalized = skill.toLowerCase();
+    if (normalized.contains('medical')) return Colors.teal;
+    if (normalized.contains('fire')) return Colors.deepOrange;
+    if (normalized.contains('search') || normalized.contains('rescue')) {
+      return Colors.indigo;
+    }
+    if (normalized.contains('women') || normalized.contains('child')) {
+      return Colors.pink.shade700;
+    }
+    return Colors.red;
+  }
 
   @override
   void initState() {
@@ -23,65 +67,22 @@ class _MapScreenState extends State<MapScreen> {
     // Don't initialize map here, wait for onMapCreated callback
   }
 
-  /// Initialize map markers and circles
-  void _initializeMap(double userLat, double userLng,
-      List<ResponderModel> responders) {
-    // Clear existing markers and circles
-    _markers.clear();
-    _circles.clear();
+  bool get _hasTarget =>
+      widget.targetLatitude != null && widget.targetLongitude != null;
 
-    _addUserMarker(userLat, userLng);
-    _addResponderMarkers(responders, userLat, userLng);
+  Future<void> _openExternalNavigation() async {
+    if (!_hasTarget) {
+      return;
+    }
 
-    // Add 5km circle around user
-    _circles.add(
-      Circle(
-        circleId: const CircleId('search_radius'),
-        center: LatLng(userLat, userLng),
-        radius: 5000, // 5km in meters
-        fillColor: Colors.blue.withOpacity(0.1),
-        strokeColor: Colors.blue.withOpacity(0.5),
-        strokeWidth: 2,
-      ),
+    final targetLat = widget.targetLatitude!;
+    final targetLng = widget.targetLongitude!;
+    final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$targetLat,$targetLng&travelmode=driving',
     );
-  }
 
-  /// Add user location marker (blue)
-  void _addUserMarker(double latitude, double longitude) {
-    _markers.add(
-      Marker(
-        markerId: const MarkerId('user_location'),
-        position: LatLng(latitude, longitude),
-        infoWindow: const InfoWindow(
-          title: 'Your Location',
-          snippet: 'You are here',
-        ),
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-          BitmapDescriptor.hueBlue,
-        ),
-      ),
-    );
-  }
-
-  /// Add responder markers (red/orange)
-  void _addResponderMarkers(List<ResponderModel> responders, double userLat,
-      double userLng) {
-    for (int i = 0; i < responders.length; i++) {
-      final responder = responders[i];
-      _markers.add(
-        Marker(
-          markerId: MarkerId('responder_${responder.id}'),
-          position: LatLng(responder.latitude, responder.longitude),
-          infoWindow: InfoWindow(
-            title: responder.name,
-            snippet:
-                '${responder.skillsArea} • ${responder.distanceToLocation(userLat, userLng).toStringAsFixed(1)} km away',
-          ),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueRed,
-          ),
-        ),
-      );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -89,22 +90,68 @@ class _MapScreenState extends State<MapScreen> {
   void _focusUserLocation() {
     final locationProvider = context.read<LocationProvider>();
     if (locationProvider.hasLocation) {
-      _mapController.animateCamera(
-        CameraUpdate.newLatLng(
-          LatLng(
-            locationProvider.latitude!,
-            locationProvider.longitude!,
+      _mapController.move(
+        LatLng(locationProvider.latitude!, locationProvider.longitude!),
+        15,
+      );
+    }
+  }
+
+  List<Marker> _buildMarkers(
+    double userLat,
+    double userLng,
+    List<ResponderModel> responders,
+  ) {
+    final markers = <Marker>[
+      Marker(
+        point: LatLng(userLat, userLng),
+        width: 44,
+        height: 44,
+        child: const Icon(Icons.my_location, color: Colors.blue, size: 34),
+      ),
+    ];
+
+    for (final responder in responders) {
+      markers.add(
+        Marker(
+          point: LatLng(responder.latitude, responder.longitude),
+          width: 48,
+          height: 48,
+          child: Tooltip(
+            message:
+                '${responder.name}\n${responder.skillsArea} • ${responder.responderType}\n${responder.distanceToLocation(userLat, userLng).toStringAsFixed(1)} km',
+            child: Icon(
+              _iconForSkill(responder.skillsArea),
+              color: _colorForSkill(responder.skillsArea),
+              size: 34,
+            ),
           ),
         ),
       );
     }
+
+    if (_hasTarget) {
+      markers.add(
+        Marker(
+          point: LatLng(widget.targetLatitude!, widget.targetLongitude!),
+          width: 52,
+          height: 52,
+          child: Tooltip(
+            message: widget.targetTitle ?? 'Help Request',
+            child: const Icon(Icons.emergency, color: Colors.deepOrange, size: 38),
+          ),
+        ),
+      );
+    }
+
+    return markers;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Responders Map'),
+        title: Text(_hasTarget ? 'Navigation Map' : 'Responders Map'),
         actions: [
           IconButton(
             icon: const Icon(Icons.my_location),
@@ -126,6 +173,51 @@ class _MapScreenState extends State<MapScreen> {
                     'Location not available',
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
+                  if (locationProvider.error != null) ...[
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        locationProvider.error!,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: Colors.grey[700]),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          await locationProvider.openLocationSettings();
+                        },
+                        icon: const Icon(Icons.gps_fixed),
+                        label: const Text('Turn On Location'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          await locationProvider.openPermissionSettings();
+                        },
+                        icon: const Icon(Icons.app_settings_alt),
+                        label: const Text('Grant Permission'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          await locationProvider.refreshLocationStatus(
+                            fetchLocation: true,
+                          );
+                        },
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry'),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             );
@@ -133,31 +225,59 @@ class _MapScreenState extends State<MapScreen> {
 
           return Stack(
             children: [
-              // Google Map
-              GoogleMap(
-                onMapCreated: (controller) {
-                  _mapController = controller;
-                  // Initialize markers after map is created
-                  _initializeMap(
-                    locationProvider.latitude!,
-                    locationProvider.longitude!,
-                    responderProvider.nearbyResponders,
-                  );
-                  setState(() {});
-                },
-                initialCameraPosition: CameraPosition(
-                  target: LatLng(
+              FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: LatLng(
                     locationProvider.latitude!,
                     locationProvider.longitude!,
                   ),
-                  zoom: 15,
+                  initialZoom: 15,
                 ),
-                markers: _markers,
-                circles: _circles,
-                myLocationEnabled: true,
-                myLocationButtonEnabled: false,
-                zoomGesturesEnabled: true,
-                scrollGesturesEnabled: true,
+                children: [
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.gdg.rescue_link',
+                  ),
+                  CircleLayer(
+                    circles: [
+                      CircleMarker(
+                        point: LatLng(
+                          locationProvider.latitude!,
+                          locationProvider.longitude!,
+                        ),
+                        radius: 120,
+                        useRadiusInMeter: true,
+                        color: Colors.blue.withValues(alpha: 0.12),
+                        borderColor: Colors.blue.withValues(alpha: 0.55),
+                        borderStrokeWidth: 2,
+                      ),
+                    ],
+                  ),
+                  if (_hasTarget)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: [
+                            LatLng(
+                              locationProvider.latitude!,
+                              locationProvider.longitude!,
+                            ),
+                            LatLng(widget.targetLatitude!, widget.targetLongitude!),
+                          ],
+                          strokeWidth: 5,
+                          color: Colors.deepOrange,
+                        ),
+                      ],
+                    ),
+                  MarkerLayer(
+                    markers: _buildMarkers(
+                      locationProvider.latitude!,
+                      locationProvider.longitude!,
+                      responderProvider.nearbyResponders,
+                    ),
+                  ),
+                ],
               ),
               // Info panel at bottom
               Positioned(
@@ -173,7 +293,7 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 10,
                         offset: const Offset(0, -2),
                       ),
@@ -186,9 +306,23 @@ class _MapScreenState extends State<MapScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Nearby Responders (5km radius)',
+                          _hasTarget
+                              ? 'Destination: ${widget.targetTitle ?? 'Help Request'}'
+                              : 'Nearby Responders (5km radius)',
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
+                        if (_hasTarget)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: _openExternalNavigation,
+                                icon: const Icon(Icons.directions),
+                                label: const Text('Open Turn-by-Turn Navigation'),
+                              ),
+                            ),
+                          ),
                         const SizedBox(height: 12),
                         if (responderProvider.nearbyResponders.isEmpty)
                           Padding(
@@ -252,6 +386,12 @@ class _MapScreenState extends State<MapScreen> {
                                         ),
                                       ),
                                       Text(
+                                        responder.responderType,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall,
+                                      ),
+                                      Text(
                                         '${distance.toStringAsFixed(1)} km away',
                                         style: Theme.of(context)
                                             .textTheme
@@ -277,7 +417,6 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
-    _mapController.dispose();
     super.dispose();
   }
 }

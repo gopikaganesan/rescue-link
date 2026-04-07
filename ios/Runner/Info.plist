@@ -53,6 +53,14 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>RescueLink needs your location to alert nearby responders during emergencies.</string>
+	<key>NSUserNotificationUsageDescription</key>
+	<string>RescueLink uses notifications to alert responders immediately during emergencies.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -66,7 +74,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>GMSApiKey</key>
-	<string>AIzaSyBQQ4U8lRJ6KjA4vWXZI4xmx_Kc-WjqAQ8</string>
 </dict>
 </plist>

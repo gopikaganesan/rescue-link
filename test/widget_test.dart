@@ -11,7 +11,7 @@ void main() {
         home: Scaffold(
           body: Center(
             child: SOSButton(
-              onPressed: () {
+              onPressed: () async {
                 tapped = true;
               },
             ),

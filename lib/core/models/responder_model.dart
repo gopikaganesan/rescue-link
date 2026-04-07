@@ -8,10 +8,14 @@ class ResponderModel {
   final String name;
   final String phoneNumber;
   final String skillsArea; // e.g., "Medical", "Fire", "Search & Rescue"
+  final String responderType;
+  final String verificationLevel;
   final double latitude;
   final double longitude;
   final bool isAvailable;
   final DateTime registeredAt;
+  final String? idDocumentUrl; // URL to uploaded ID document in Firebase Storage
+  final String? idDocumentFileName; // Original filename of uploaded document
 
   ResponderModel({
     required this.id,
@@ -19,10 +23,14 @@ class ResponderModel {
     required this.name,
     required this.phoneNumber,
     required this.skillsArea,
+    this.responderType = 'Volunteer',
+    this.verificationLevel = 'Self-declared',
     required this.latitude,
     required this.longitude,
     this.isAvailable = true,
     required this.registeredAt,
+    this.idDocumentUrl,
+    this.idDocumentFileName,
   });
 
   // Distance calculation (simplified Haversine)
@@ -50,10 +58,14 @@ class ResponderModel {
       'name': name,
       'phoneNumber': phoneNumber,
       'skillsArea': skillsArea,
+      'responderType': responderType,
+      'verificationLevel': verificationLevel,
       'latitude': latitude,
       'longitude': longitude,
       'isAvailable': isAvailable,
       'registeredAt': registeredAt,
+      if (idDocumentUrl != null) 'idDocumentUrl': idDocumentUrl,
+      if (idDocumentFileName != null) 'idDocumentFileName': idDocumentFileName,
     };
   }
 
@@ -72,10 +84,15 @@ class ResponderModel {
       name: (map['name'] as String?) ?? '',
       phoneNumber: (map['phoneNumber'] as String?) ?? '',
       skillsArea: (map['skillsArea'] as String?) ?? '',
+      responderType: (map['responderType'] as String?) ?? 'Volunteer',
+      verificationLevel:
+          (map['verificationLevel'] as String?) ?? 'Self-declared',
       latitude: (map['latitude'] as num?)?.toDouble() ?? 0.0,
       longitude: (map['longitude'] as num?)?.toDouble() ?? 0.0,
       isAvailable: (map['isAvailable'] as bool?) ?? true,
       registeredAt: parsedRegisteredAt,
+      idDocumentUrl: (map['idDocumentUrl'] as String?),
+      idDocumentFileName: (map['idDocumentFileName'] as String?),
     );
   }
 
@@ -85,10 +102,14 @@ class ResponderModel {
     String? name,
     String? phoneNumber,
     String? skillsArea,
+    String? responderType,
+    String? verificationLevel,
     double? latitude,
     double? longitude,
     bool? isAvailable,
     DateTime? registeredAt,
+    String? idDocumentUrl,
+    String? idDocumentFileName,
   }) {
     return ResponderModel(
       id: id ?? this.id,
@@ -96,10 +117,14 @@ class ResponderModel {
       name: name ?? this.name,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       skillsArea: skillsArea ?? this.skillsArea,
+      responderType: responderType ?? this.responderType,
+      verificationLevel: verificationLevel ?? this.verificationLevel,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       isAvailable: isAvailable ?? this.isAvailable,
       registeredAt: registeredAt ?? this.registeredAt,
+      idDocumentUrl: idDocumentUrl ?? this.idDocumentUrl,
+      idDocumentFileName: idDocumentFileName ?? this.idDocumentFileName,
     );
   }
 }
