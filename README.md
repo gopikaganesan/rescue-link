@@ -4,7 +4,7 @@
 AI-powered emergency mesh network for Rapid Crisis Response.
 
 ## About
-RapidLink connects people in crisis to nearby responders and resources — even when mobile towers or internet are down.  
+RescueLink connects people in crisis to nearby responders and resources — even when mobile towers or internet are down.  
 Uses Bluetooth/WiFi-Direct mesh (simulated in prototype) + Gemini AI for crisis classification and smart matching.
 
 Built with **Flutter + Firebase + Gemini** for GDG on Campus CIT Solution Challenge 2026 (Emergency Crisis track).
