@@ -1,8 +1,14 @@
 import 'dart:async';
+import 'dart:typed_data';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:record/record.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 import 'package:torch_light/torch_light.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/providers/app_settings_provider.dart';
@@ -13,7 +19,9 @@ import '../core/providers/emergency_request_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/services/notification_service.dart';
+import '../core/services/media_upload_service.dart';
 import '../core/services/responder_matching_service.dart';
+import '../core/services/transcription_service.dart';
 import 'auth_screen.dart';
 import 'responder_registration_screen.dart';
 import 'responder_requests_screen.dart';
@@ -33,12 +41,43 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<String> _notifiedRequestIds = <String>{};
   String _lastDeliveryRoute = 'Internet route';
   String? _currentSosRequestId; // Track current SOS for cancellation
+  final ImagePicker _imagePicker = ImagePicker();
+  final SpeechToText _speechToText = SpeechToText();
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  final AudioPlayer _voicePreviewPlayer = AudioPlayer();
+  final TranscriptionService _transcriptionService = TranscriptionService();
+  final MediaUploadService _mediaUploadService = MediaUploadService.fromEnvironment();
+  StreamSubscription<void>? _voicePreviewCompleteSub;
+  bool _speechReady = false;
+  bool _isTranscribing = false;
+  bool _isRecordingClip = false;
+  bool _isPreviewPlaying = false;
+  bool _includeVoiceClip = false;
+  bool _forceCriticalSeverity = false;
+  String _transcriptionProvider = 'On-device speech';
+  double? _transcriptionConfidence;
+  final bool _cloudTranscriptionEnabled =
+      const String.fromEnvironment('USE_CLOUD_TRANSCRIPTION', defaultValue: 'false') ==
+          'true';
+  XFile? _selectedImage;
+  String? _voiceTranscript;
+  String? _voiceAudioPath;
+  String? _attachmentType;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeScreen();
+    });
+    _initializeSpeech();
+    _voicePreviewCompleteSub = _voicePreviewPlayer.onPlayerComplete.listen((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isPreviewPlaying = false;
+      });
     });
   }
 
@@ -54,6 +93,33 @@ class _HomeScreenState extends State<HomeScreen> {
     await emergencyProvider.retryPendingSync();
     await _syncPushProfile();
     _startResponderAlertPolling();
+  }
+
+  Future<void> _initializeSpeech() async {
+    try {
+      _speechReady = await _speechToText.initialize(
+        onStatus: (status) {
+          if (status == 'notListening' && mounted) {
+            setState(() {
+              _isTranscribing = false;
+            });
+          }
+        },
+        onError: (error) {
+          if (mounted) {
+            setState(() {
+              _isTranscribing = false;
+            });
+          }
+        },
+      );
+    } catch (_) {
+      _speechReady = false;
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _syncPushProfile() async {
@@ -169,11 +235,73 @@ class _HomeScreenState extends State<HomeScreen> {
         locationProvider.longitude!,
       );
 
-        final aiInput =
+      final typedMessage = _emergencyContextController.text.trim();
+      String transcript = _voiceTranscript?.trim() ?? '';
+
+      final baseMessageParts = <String>[];
+      if (typedMessage.isNotEmpty) {
+        baseMessageParts.add(typedMessage);
+      }
+      if (transcript.isNotEmpty && transcript != typedMessage) {
+        baseMessageParts.add('Voice note: $transcript');
+      }
+
+      final aiMessageParts = List<String>.from(baseMessageParts);
+      if (_selectedImage != null) {
+        aiMessageParts.add('Photo evidence selected');
+      }
+
+      final aiMessage = aiMessageParts.isEmpty
+          ? 'Potential emergency needs urgent support.'
+          : aiMessageParts.join(' ');
+
+      if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty) {
+        final currentWordCount = transcript
+            .split(RegExp(r'\s+'))
+            .where((word) => word.trim().isNotEmpty)
+            .length;
+        final shouldUseCloudAssist = currentWordCount < 3;
+        if (shouldUseCloudAssist) {
+          final audioBytes = await XFile(_voiceAudioPath!).readAsBytes();
+          final cloudResult = await _transcriptionService.transcribeWithCloud(
+            audioBytes: audioBytes,
+            languageCode: _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
+            alternativeLanguageCodes: _speechAlternatives(
+              _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
+            ),
+          );
+          if (cloudResult != null && cloudResult.transcript.trim().isNotEmpty) {
+            transcript = cloudResult.transcript.trim();
+            _voiceTranscript = transcript;
+            _transcriptionProvider = cloudResult.provider;
+            _transcriptionConfidence = cloudResult.confidence;
+            if (_emergencyContextController.text.trim().isEmpty) {
+              _emergencyContextController.text = transcript;
+              _emergencyContextController.selection = TextSelection.fromPosition(
+                TextPosition(offset: _emergencyContextController.text.length),
+              );
+            }
+          }
+        }
+      }
+
+      final aiInput =
           'SOS triggered by ${authProvider.currentUser!.displayName} near '
           '${locationProvider.latitude!.toStringAsFixed(4)}, '
           '${locationProvider.longitude!.toStringAsFixed(4)}. '
-          '${_emergencyContextController.text.trim().isEmpty ? 'Potential emergency needs urgent support.' : _emergencyContextController.text.trim()}';
+          'Human report: $aiMessage';
+
+      Uint8List? imageBytesForAi;
+      String? imageMimeTypeForAi;
+      if (_selectedImage != null) {
+        try {
+          imageBytesForAi = await _selectedImage!.readAsBytes();
+          imageMimeTypeForAi = _contentTypeForName(_selectedImage!.name);
+        } catch (_) {
+          imageBytesForAi = null;
+          imageMimeTypeForAi = null;
+        }
+      }
 
       await crisisProvider.classifyCrisis(
         aiInput,
@@ -182,7 +310,39 @@ class _HomeScreenState extends State<HomeScreen> {
             .toSet()
             .toList(),
         forceOffline: commsProvider.forceOfflineAi,
+        imageBytes: imageBytesForAi,
+        imageMimeType: imageMimeTypeForAi,
       );
+
+      String? attachmentUrl;
+      try {
+        attachmentUrl = await _uploadAttachmentIfNeeded(authProvider.currentUser!.id);
+      } catch (e) {
+        attachmentUrl = null;
+        _showSnackBar('Photo upload failed: ${e.toString()}');
+      }
+      _attachmentType = attachmentUrl != null ? 'image' : null;
+
+      String? voiceAudioUrl;
+      if (_includeVoiceClip) {
+        try {
+          voiceAudioUrl = await _uploadVoiceAudioIfNeeded(authProvider.currentUser!.id);
+        } catch (e) {
+          voiceAudioUrl = null;
+          _showSnackBar('Audio attach failed: ${e.toString()}');
+        }
+      }
+
+      final originalMessageParts = List<String>.from(baseMessageParts);
+      if (attachmentUrl != null) {
+        originalMessageParts.add('Photo attached');
+      }
+      if (voiceAudioUrl != null) {
+        originalMessageParts.add('Voice clip attached');
+      }
+      final originalMessage = originalMessageParts.isEmpty
+          ? 'Potential emergency needs urgent support.'
+          : originalMessageParts.join(' ');
 
       // Find nearby responders within 5km
       responderProvider.findNearbyResponders(
@@ -193,15 +353,28 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       final analysis = crisisProvider.latestAnalysis;
+        final finalSeverity = _forceCriticalSeverity
+          ? 'critical'
+          : (analysis?.severity ?? 'medium');
       final requestId = await emergencyRequestProvider.createRequest(
         requesterUserId: authProvider.currentUser!.id,
         requesterName: authProvider.currentUser!.displayName,
         latitude: locationProvider.latitude!,
         longitude: locationProvider.longitude!,
         category: analysis?.category ?? 'General Emergency',
-        severity: analysis?.severity ?? 'medium',
+        severity: finalSeverity,
+        originalMessage: originalMessage,
+        voiceTranscript: transcript.isEmpty ? null : transcript,
+        voiceAudioUrl: voiceAudioUrl,
+        voiceAudioType: voiceAudioUrl != null ? 'audio/wav' : null,
+        attachmentUrl: attachmentUrl,
+        attachmentType: _attachmentType,
         summary: analysis?.summary ?? 'SOS triggered by user',
         recommendedSkill: analysis?.recommendedSkill ?? 'General Support',
+        suggestedActions: analysis?.suggestedActions ?? const <String>[],
+        aiConfidence: analysis?.confidence,
+        humanReviewRecommended: analysis?.humanReviewRecommended ?? false,
+        forcedCriticalByUser: _forceCriticalSeverity,
       );
 
       _currentSosRequestId = requestId;
@@ -336,10 +509,31 @@ class _HomeScreenState extends State<HomeScreen> {
                   'Severity: ${analysis.severity}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
+                if (_forceCriticalSeverity)
+                  Text(
+                    'Manual override: CRITICAL',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.red.shade800,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
                 Text(
                   'Skill Match: ${analysis.recommendedSkill}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
+                if (analysis.confidence > 0)
+                  Text(
+                    'AI confidence: ${(analysis.confidence * 100).toStringAsFixed(0)}%',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                if (analysis.humanReviewRecommended)
+                  Text(
+                    'Human review recommended',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.orange.shade800,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
                 if (analysis.suggestedActions.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -951,24 +1145,354 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _sendEmergencySms() async {
-    final location = context.read<LocationProvider>();
-    final lat = location.latitude?.toStringAsFixed(5) ?? 'unknown';
-    final lng = location.longitude?.toStringAsFixed(5) ?? 'unknown';
-    final text = _emergencyContextController.text.trim().isEmpty
-        ? 'Emergency help needed. My location: $lat,$lng'
-        : '${_emergencyContextController.text.trim()}. Location: $lat,$lng';
-    final uri = Uri.parse('sms:112?body=${Uri.encodeComponent(text)}');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      _showSnackBar('Could not open SMS app.');
+  Future<void> _toggleVoiceInput() async {
+    if (!_speechReady) {
+      _showSnackBar('Voice input is not available on this device.');
+      return;
     }
+
+    if (_isTranscribing) {
+      await _speechToText.stop();
+      if (mounted) {
+        setState(() {
+          _isTranscribing = false;
+        });
+      }
+      return;
+    }
+
+    await _speechToText.listen(
+      onResult: (result) {
+        if (!mounted) {
+          return;
+        }
+
+        final words = result.recognizedWords.trim();
+        setState(() {
+          _isTranscribing = true;
+          _voiceTranscript = words.isEmpty ? _voiceTranscript : words;
+          if (words.isNotEmpty) {
+            _transcriptionProvider = 'On-device speech';
+            _transcriptionConfidence = null;
+          }
+          if (words.isNotEmpty &&
+              (result.finalResult || _emergencyContextController.text.trim().isEmpty)) {
+            _emergencyContextController.text = words;
+            _emergencyContextController.selection = TextSelection.fromPosition(
+              TextPosition(offset: _emergencyContextController.text.length),
+            );
+          }
+        });
+      },
+      listenOptions: SpeechListenOptions(
+        partialResults: true,
+        listenMode: ListenMode.dictation,
+      ),
+      listenFor: const Duration(minutes: 2),
+      pauseFor: const Duration(seconds: 8),
+      localeId: _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
+    );
+
+    if (mounted) {
+      setState(() {
+        _isTranscribing = true;
+      });
+    }
+  }
+
+  Future<void> _toggleVoiceClipRecording() async {
+    final canRecordAudio = await _audioRecorder.hasPermission();
+    if (!canRecordAudio) {
+      _showSnackBar('Microphone permission is required for voice clip recording.');
+      return;
+    }
+
+    if (_isRecordingClip) {
+      final path = await _audioRecorder.stop();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isRecordingClip = false;
+        if (path != null && path.trim().isNotEmpty) {
+          _voiceAudioPath = path;
+          _includeVoiceClip = true;
+        }
+      });
+      return;
+    }
+
+    final tempDir = await getTemporaryDirectory();
+    final voicePath = '${tempDir.path}/clip_${DateTime.now().millisecondsSinceEpoch}.wav';
+    await _audioRecorder.start(
+      const RecordConfig(
+        encoder: AudioEncoder.wav,
+        sampleRate: 16000,
+        numChannels: 1,
+      ),
+      path: voicePath,
+    );
+
+    if (mounted) {
+      setState(() {
+        _isRecordingClip = true;
+      });
+    }
+  }
+
+  Future<void> _pickCameraImage() async {
+    final file = await _imagePicker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 85,
+    );
+
+    if (file == null) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _selectedImage = file;
+    });
+  }
+
+  void _removePhotoAttachment() {
+    setState(() {
+      _selectedImage = null;
+      _attachmentType = null;
+    });
+  }
+
+  Future<void> _removeVoiceAttachment() async {
+    await _voicePreviewPlayer.stop();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _voiceAudioPath = null;
+      _includeVoiceClip = false;
+      _isPreviewPlaying = false;
+      _isRecordingClip = false;
+    });
+  }
+
+  Future<void> _previewSelectedPhoto() async {
+    final image = _selectedImage;
+    if (image == null) {
+      return;
+    }
+
+    final imageBytes = await image.readAsBytes();
+    if (!mounted) {
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.photo_library_outlined),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        image.name.isEmpty ? 'Attached photo' : image.name,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Flexible(
+                  child: InteractiveViewer(
+                    minScale: 0.8,
+                    maxScale: 4.0,
+                    child: Image.memory(
+                      imageBytes,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAttachmentCard({
+    required IconData icon,
+    required String fileName,
+    required String fileKind,
+    required String semanticsLabel,
+    required VoidCallback onOpen,
+    required VoidCallback onRemove,
+    IconData? statusIcon,
+    Color? statusColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Colors.blueGrey.shade50,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(icon, size: 18, color: Colors.blueGrey.shade700),
+          ),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 170),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  fileName,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                Text(
+                  fileKind,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.grey.shade600,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          if (statusIcon != null) ...[
+            const SizedBox(width: 8),
+            Icon(statusIcon, size: 16, color: statusColor ?? Colors.green.shade700),
+          ],
+          const SizedBox(width: 2),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: semanticsLabel,
+            onPressed: onOpen,
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Remove attachment',
+            onPressed: onRemove,
+            icon: const Icon(Icons.close, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _speechLocaleForLanguage(String languageCode) {
+    switch (languageCode) {
+      case 'hi':
+        return 'hi-IN';
+      case 'ta':
+        return 'ta-IN';
+      case 'en':
+      default:
+        return 'en-IN';
+    }
+  }
+
+  List<String> _speechAlternatives(String locale) {
+    switch (locale) {
+      case 'ta-IN':
+        return const <String>['en-IN', 'hi-IN'];
+      case 'hi-IN':
+        return const <String>['en-IN', 'ta-IN'];
+      case 'en-US':
+        return const <String>['en-IN', 'hi-IN'];
+      case 'en-IN':
+      default:
+        return const <String>['ta-IN', 'hi-IN'];
+    }
+  }
+
+  Future<void> _toggleLocalVoicePreview() async {
+    final localPath = _voiceAudioPath;
+    if (localPath == null || localPath.trim().isEmpty) {
+      return;
+    }
+
+    if (_isPreviewPlaying) {
+      await _voicePreviewPlayer.stop();
+      if (mounted) {
+        setState(() {
+          _isPreviewPlaying = false;
+        });
+      }
+      return;
+    }
+
+    await _voicePreviewPlayer.play(DeviceFileSource(localPath));
+    if (mounted) {
+      setState(() {
+        _isPreviewPlaying = true;
+      });
+    }
+  }
+
+  String _contentTypeForName(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    return 'image/jpeg';
+  }
+
+  Future<String?> _uploadAttachmentIfNeeded(String userId) async {
+    final image = _selectedImage;
+    if (image == null) {
+      return null;
+    }
+    return _mediaUploadService.uploadEmergencyImage(image: image, userId: userId);
+  }
+
+  Future<String?> _uploadVoiceAudioIfNeeded(String userId) async {
+    final localPath = _voiceAudioPath;
+    if (localPath == null || localPath.trim().isEmpty) {
+      return null;
+    }
+    return _mediaUploadService.uploadEmergencyVoice(localPath: localPath, userId: userId);
   }
 
   @override
   void dispose() {
     _responderPollingTimer?.cancel();
+    _speechToText.stop();
+    _audioRecorder.dispose();
+    _voicePreviewCompleteSub?.cancel();
+    _voicePreviewPlayer.dispose();
     _emergencyContextController.dispose();
     super.dispose();
   }
@@ -977,6 +1501,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
     final authProvider = context.watch<AuthProvider>();
+    final commsProvider = context.watch<CommsProvider>();
 
     return Scaffold(
       appBar: AppBar(
@@ -985,15 +1510,15 @@ class _HomeScreenState extends State<HomeScreen> {
         elevation: 0,
         backgroundColor: Colors.red.shade700,
         actions: [
-          Semantics(
-            button: true,
-            label: 'Switch app language',
-            child: IconButton(
-              icon: const Icon(Icons.language),
-              onPressed: _showLanguagePicker,
-              tooltip: settings.t('language'),
+            Semantics(
+              button: true,
+              label: 'Switch app language',
+              child: IconButton(
+                icon: const Icon(Icons.language),
+                onPressed: _showLanguagePicker,
+                tooltip: settings.t('language'),
+              ),
             ),
-          ),
           Consumer<AuthProvider>(
             builder: (context, authProvider, _) {
               if (authProvider.currentUser?.isResponder != true) {
@@ -1085,11 +1610,242 @@ class _HomeScreenState extends State<HomeScreen> {
                       controller: _emergencyContextController,
                       minLines: 1,
                       maxLines: 3,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Emergency details (optional)',
                         hintText:
-                            'Example: elderly person fell, flood nearby, child missing, no transport',
-                        border: OutlineInputBorder(),
+                            'Example: person drowning, rail-track hazard, swarm attack, limb trapped',
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          tooltip: _voiceAudioPath == null
+                              ? 'Record a voice clip first'
+                              : (_includeVoiceClip
+                                  ? 'Detach voice clip from SOS'
+                                  : 'Attach voice clip to SOS'),
+                          onPressed: (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
+                              ? () {
+                                  setState(() {
+                                    _includeVoiceClip = !_includeVoiceClip;
+                                  });
+                                }
+                              : null,
+                          icon: Icon(
+                            _includeVoiceClip ? Icons.attach_file : Icons.attach_file_outlined,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          IconButton.filledTonal(
+                            tooltip: _isTranscribing ? 'Stop voice-to-text' : 'Voice to text',
+                            onPressed: _speechReady ? _toggleVoiceInput : null,
+                            icon: Icon(_isTranscribing ? Icons.stop : Icons.mic),
+                          ),
+                          IconButton.filledTonal(
+                            tooltip: _isRecordingClip ? 'Stop voice clip' : 'Record voice clip',
+                            onPressed: _toggleVoiceClipRecording,
+                            icon: Icon(
+                              _isRecordingClip ? Icons.stop_circle : Icons.keyboard_voice_rounded,
+                            ),
+                          ),
+                          IconButton.filledTonal(
+                            tooltip: _isPreviewPlaying ? 'Stop preview' : 'Play preview',
+                            onPressed: (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
+                                ? _toggleLocalVoicePreview
+                                : null,
+                            icon: Icon(_isPreviewPlaying ? Icons.stop : Icons.play_arrow),
+                          ),
+                          if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.blueGrey.shade50,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: Colors.blueGrey.shade100),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _includeVoiceClip ? Icons.link : Icons.link_off,
+                                    size: 15,
+                                    color: _includeVoiceClip
+                                        ? Colors.teal.shade700
+                                        : Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Icon(
+                                    _isRecordingClip
+                                        ? Icons.fiber_manual_record
+                                        : Icons.check_circle,
+                                    size: 15,
+                                    color: _isRecordingClip
+                                        ? Colors.red.shade700
+                                        : Colors.green.shade700,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          IconButton.filledTonal(
+                            tooltip: 'Capture photo',
+                            onPressed: _pickCameraImage,
+                            icon: const Icon(Icons.camera_alt),
+                          ),
+                          FilterChip(
+                            selected: _forceCriticalSeverity,
+                            label: const Text('Force Critical'),
+                            selectedColor: Colors.red.shade100,
+                            checkmarkColor: Colors.red.shade800,
+                            onSelected: (value) {
+                              setState(() {
+                                _forceCriticalSeverity = value;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        commsProvider.forceOfflineAi
+                            ? 'Visual AI disabled (Local fallback)'
+                            : 'Visual AI enabled (Gemini multimodal)',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: commsProvider.forceOfflineAi
+                                  ? Colors.orange.shade800
+                                  : Colors.blue.shade800,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _cloudTranscriptionEnabled
+                            ? 'Transcription: Cloud assist enabled'
+                            : 'Transcription: On-device only (free mode)',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: _cloudTranscriptionEnabled
+                                  ? Colors.teal.shade800
+                                  : Colors.green.shade800,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                    if (_voiceTranscript != null && _voiceTranscript!.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          Chip(
+                            avatar: const Icon(Icons.subtitles, size: 18),
+                            label: Text(
+                              _transcriptionConfidence == null
+                                  ? 'Transcript ready'
+                                  : 'Transcript ${( _transcriptionConfidence! * 100).toStringAsFixed(0)}%',
+                            ),
+                          ),
+                          if (_transcriptionProvider.isNotEmpty)
+                            Chip(
+                              avatar: const Icon(Icons.mic_external_on_outlined, size: 18),
+                              label: Text(_transcriptionProvider),
+                            ),
+                        ],
+                      ),
+                    ],
+                    if (_selectedImage != null ||
+                        (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              if (_selectedImage != null)
+                                _buildAttachmentCard(
+                                  icon: Icons.image_outlined,
+                                  fileName: _selectedImage!.name.isEmpty
+                                      ? 'photo_attachment.jpg'
+                                      : _selectedImage!.name,
+                                  fileKind: 'Photo attachment',
+                                  semanticsLabel: 'View attached photo',
+                                  onOpen: _previewSelectedPhoto,
+                                  onRemove: _removePhotoAttachment,
+                                ),
+                              if (_selectedImage != null &&
+                                  _voiceAudioPath != null &&
+                                  _voiceAudioPath!.isNotEmpty)
+                                const SizedBox(width: 8),
+                              if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
+                                _buildAttachmentCard(
+                                  icon: Icons.graphic_eq_rounded,
+                                  fileName: 'voice_clip.wav',
+                                  fileKind: 'Voice attachment',
+                                  semanticsLabel: 'Play attached voice clip',
+                                  onOpen: _toggleLocalVoicePreview,
+                                  onRemove: () {
+                                    _removeVoiceAttachment();
+                                  },
+                                  statusIcon:
+                                      _includeVoiceClip ? Icons.link : Icons.link_off,
+                                  statusColor: _includeVoiceClip
+                                      ? Colors.teal.shade700
+                                      : Colors.grey.shade600,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: commsProvider.forceOfflineAi
+                            ? Colors.orange.shade50
+                            : Colors.blue.shade50,
+                        border: Border.all(
+                          color: commsProvider.forceOfflineAi
+                              ? Colors.orange.shade300
+                              : Colors.blue.shade300,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            commsProvider.forceOfflineAi ? Icons.cloud_off : Icons.auto_awesome,
+                            size: 18,
+                            color: commsProvider.forceOfflineAi
+                                ? Colors.orange.shade800
+                                : Colors.blue.shade800,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            commsProvider.forceOfflineAi
+                                ? 'Local Fallback'
+                                : 'Powered by Gemini',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                  color: commsProvider.forceOfflineAi
+                                      ? Colors.orange.shade900
+                                      : Colors.blue.shade900,
+                                ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 20),

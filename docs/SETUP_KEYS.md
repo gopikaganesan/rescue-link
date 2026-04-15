@@ -56,7 +56,38 @@ iOS:
 - Ensure notification permission is granted in system settings.
 - Configure APNs auth key/certificate in Firebase for iOS push delivery.
 
-## 4) Optional Next Step for Background/Realtime Push
+## 4) Media Upload Provider (Pluggable)
+
+Emergency photo/audio uploads now use a provider abstraction in:
+
+- `lib/core/services/media_upload_service.dart`
+
+Runtime config via `--dart-define` (or `env/dev.json`):
+
+- `MEDIA_UPLOAD_PROVIDER`:
+   - `firebase` (default)
+   - `cloudinary`
+- `CLOUDINARY_CLOUD_NAME` (required when provider is `cloudinary`)
+- `CLOUDINARY_UPLOAD_PRESET` (required when provider is `cloudinary`)
+
+Recommended local dev setup in `env/dev.json`:
+
+```json
+{
+   "GEMINI_API_KEY": "YOUR_KEY",
+   "USE_CLOUD_TRANSCRIPTION": "false",
+   "MEDIA_UPLOAD_PROVIDER": "cloudinary",
+   "CLOUDINARY_CLOUD_NAME": "your-cloud",
+   "CLOUDINARY_UPLOAD_PRESET": "your_unsigned_preset"
+}
+```
+
+Notes:
+
+- This keeps Firebase Auth/Firestore unchanged while allowing media uploads to use a free-tier provider.
+- If `cloudinary` is selected but required values are missing, upload will fail with a clear error.
+
+## 5) Optional Next Step for Background/Realtime Push
 
 For true background immediate alerts, add Firebase Cloud Messaging server-side dispatch:
 

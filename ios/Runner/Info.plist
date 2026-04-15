@@ -55,6 +55,12 @@
 	<string>Main</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>RescueLink needs your location to alert nearby responders during emergencies.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>RescueLink needs camera access to capture a scene photo for responders.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>RescueLink needs microphone access to record a voice note for responders.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>RescueLink uses speech recognition to turn your voice note into text for responders.</string>
 	<key>NSUserNotificationUsageDescription</key>
 	<string>RescueLink uses notifications to alert responders immediately during emergencies.</string>
 	<key>UIBackgroundModes</key>
