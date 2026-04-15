@@ -19,6 +19,7 @@ class CrisisProvider extends ChangeNotifier {
   Future<void> classifyCrisis(
     String input, {
     List<String> availableSkills = const <String>[],
+    bool forceOffline = false,
   }) async {
     _isLoading = true;
     _error = null;
@@ -28,6 +29,7 @@ class CrisisProvider extends ChangeNotifier {
       _latestAnalysis = await _geminiService.analyze(
         input,
         availableSkills: availableSkills,
+        forceOffline: forceOffline,
       );
     } catch (e) {
       _error = 'Classification failed: ${e.toString()}';

@@ -181,6 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
             .map((responder) => responder.skillsArea)
             .toSet()
             .toList(),
+        forceOffline: commsProvider.forceOfflineAi,
       );
 
       // Find nearby responders within 5km
@@ -786,10 +787,47 @@ class _HomeScreenState extends State<HomeScreen> {
                       }
                     },
                   ),
-                  const SizedBox(height: 8),
+                  if (comms.mode == CommsMode.meshSimulated ||
+                      comms.mode == CommsMode.satelliteSimulated)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade100,
+                          border: Border.all(color: Colors.orange.shade300),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.info, color: Colors.orange.shade700, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'AI will use offline heuristic only',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Colors.orange.shade900,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Simulate tower failure'),
+                    subtitle: comms.simulateTowerFailure
+                        ? Text(
+                            'AI will use offline heuristic only',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Colors.red.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                          )
+                        : null,
                     value: comms.simulateTowerFailure,
                     onChanged: (value) {
                       comms.setSimulateTowerFailure(value);
@@ -799,16 +837,51 @@ class _HomeScreenState extends State<HomeScreen> {
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Device supports satellite (simulated)'),
+                    subtitle: comms.deviceSupportsSatellite
+                        ? Text(
+                            'AI will use offline heuristic only',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Colors.red.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                          )
+                        : null,
                     value: comms.deviceSupportsSatellite,
                     onChanged: (value) {
                       comms.setDeviceSupportsSatellite(value);
                       setModalState(() {});
                     },
                   ),
+                  const SizedBox(height: 8),
                   Text(
                     'This simulation allows testing disaster/lockdown connectivity fallback without real mesh or satellite hardware.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  const SizedBox(height: 8),
+                  if (comms.forceOfflineAi)
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        border: Border.all(color: Colors.red.shade300),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.warning_amber, color: Colors.red.shade700, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Crisis AI is in offline mode. Gemini API will not be used.',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Colors.red.shade900,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             );
