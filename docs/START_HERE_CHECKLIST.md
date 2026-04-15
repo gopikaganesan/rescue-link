@@ -15,6 +15,12 @@
 - Color-coded action buttons (Cancel SOS: red, Map: blue, Emergency: orange)
 - Safer visual feedback to reduce anxiety after SOS is triggered
 
+✅ **Responder Profile Experience**:
+- Added responder profile details for SOS flow: responder type, availability, verification status, rescue count, ratings, and review count
+- Added profile entry points from nearby responder cards on map (`View profile`) and responder account sheet (`View my profile`)
+- Added quick contact actions (call and temporary message fallback) from responder profile screen
+- Added future-ready model fields for verification and ratings (`verifiedResponder`, `rescueCount`, `averageRating`, `ratingCount`)
+
 ## Still To Do
 1. Firebase Console
 - Confirm Android and iOS app registrations

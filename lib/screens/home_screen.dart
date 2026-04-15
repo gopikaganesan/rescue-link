@@ -14,10 +14,12 @@ import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/services/notification_service.dart';
 import '../core/services/responder_matching_service.dart';
+import '../core/models/responder_model.dart';
 import 'auth_screen.dart';
 import 'responder_registration_screen.dart';
 import 'responder_requests_screen.dart';
 import 'map_screen.dart';
+import 'responder_profile_screen.dart';
 import '../widgets/sos_button.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -481,6 +483,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _openResponderProfile(ResponderModel responder) {
+    final locationProvider = context.read<LocationProvider>();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ResponderProfileScreen(
+          responder: responder,
+          viewerLatitude: locationProvider.latitude,
+          viewerLongitude: locationProvider.longitude,
+          isCurrentUserProfile: true,
+        ),
+      ),
+    );
+  }
+
   void _openAuthScreen() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -587,10 +603,8 @@ class _HomeScreenState extends State<HomeScreen> {
               if (user.isResponder)
                 Consumer<ResponderProvider>(
                   builder: (context, responderProvider, _) {
-                    final mine = responderProvider.responders
-                        .where((r) => r.userId == user.id)
-                        .toList();
-                    final isAvailable = mine.isEmpty ? true : mine.first.isAvailable;
+                    final mine = responderProvider.responderForUserId(user.id);
+                    final isAvailable = mine?.isAvailable ?? true;
 
                     return Column(
                       children: [
@@ -602,12 +616,27 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         Align(
                           alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            onPressed: () async {
-                              Navigator.of(sheetContext).pop();
-                              await _deregisterResponder();
-                            },
-                            child: const Text('De-register as responder'),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              TextButton(
+                                onPressed: mine == null
+                                    ? null
+                                    : () {
+                                        Navigator.of(sheetContext).pop();
+                                        _openResponderProfile(mine);
+                                      },
+                                child: const Text('View my profile'),
+                              ),
+                              TextButton(
+                                onPressed: () async {
+                                  Navigator.of(sheetContext).pop();
+                                  await _deregisterResponder();
+                                },
+                                child: const Text('De-register as responder'),
+                              ),
+                            ],
                           ),
                         ),
                       ],
