@@ -16,6 +16,7 @@ Built with **Flutter + Firebase + Gemini** for GDG on Campus CIT Solution Challe
 - Offline Mesh + Satellite Mode (simulated fallback)
 - Nearby map of resources
 - Role-aware responder notifications (skill + responder type + distance)
+- Responder profile screen with ratings, rescue count, responder type, verification status, and quick call/message actions
 - Emergency fallback actions (call/SMS 112) when no nearby responders
 
 ## Tech Stack
