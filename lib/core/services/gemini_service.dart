@@ -30,8 +30,9 @@ class GeminiService {
   Future<CrisisAnalysis> analyze(
     String userInput, {
     List<String> availableSkills = const <String>[],
+    bool forceOffline = false,
   }) async {
-    if (_apiKey.isEmpty) {
+    if (forceOffline || _apiKey.isEmpty) {
       return _offlineHeuristic(userInput);
     }
 
