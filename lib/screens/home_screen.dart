@@ -1,7 +1,6 @@
 import 'dart:async';
-import 'package:animated_bottom_navigation_bar/animated_bottom_navigation_bar.dart';
 import 'dart:typed_data';
-
+import 'package:animated_bottom_navigation_bar/animated_bottom_navigation_bar.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -30,7 +29,7 @@ import 'responder_requests_screen.dart';
 import 'map_screen.dart';
 import 'responder_profile_screen.dart';
 import '../widgets/sos_button.dart';
-import 'dart:ui';
+import 'dart:ui';	 
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -99,8 +98,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await _syncPushProfile();
     _startResponderAlertPolling();
   }
-
-  
 
   Future<void> _initializeSpeech() async {
     try {
@@ -296,6 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'SOS triggered by ${authProvider.currentUser!.displayName} near '
           '${locationProvider.latitude!.toStringAsFixed(4)}, '
           '${locationProvider.longitude!.toStringAsFixed(4)}. '
+		  '${_emergencyContextController.text.trim().isEmpty ? 'Potential emergency needs urgent support.' : _emergencyContextController.text.trim()}'
           'Human report: $aiMessage';
 
       Uint8List? imageBytesForAi;
@@ -725,7 +723,7 @@ void _showLanguagePicker() {
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(
-            top: Radius.circular(24),
+            top: Radius.circular(24),						  
           ),
         ),
         child: Column(
@@ -857,7 +855,7 @@ void _showAccountSheet() {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 🔹 Drag handle
+
             Container(
               height: 4,
               width: 40,
@@ -868,7 +866,6 @@ void _showAccountSheet() {
               ),
             ),
 
-            // 🔹 Profile Header
             Row(
               children: [
                 CircleAvatar(
@@ -901,10 +898,8 @@ void _showAccountSheet() {
                 ),
               ],
             ),
-
             const SizedBox(height: 16),
 
-            // 🔹 Session Chip
             Align(
               alignment: Alignment.centerLeft,
               child: Chip(
@@ -915,15 +910,12 @@ void _showAccountSheet() {
                 ),
               ),
             ),
-
-            const SizedBox(height: 20),
-
-            // 🔹 Actions Section
+            const SizedBox(height: 20),					
             Column(
-              children: [
+              children: [	 
                 if (authProvider.isAnonymousUser)
                   SizedBox(
-                    width: double.infinity,
+                    width: double.infinity,		   
                     child: OutlinedButton.icon(
                       onPressed: () {
                         Navigator.of(sheetContext).pop();
@@ -958,6 +950,7 @@ void _showAccountSheet() {
                       icon: const Icon(Icons.list_alt),
                       label: const Text('People Needing Help'),
                     ),
+				  
                   ),
               ],
             ),
@@ -974,14 +967,6 @@ void _showAccountSheet() {
 
                   final isAvailable =
                       mine.isEmpty ? true : mine.first.isAvailable;
-                    ),
-                ],
-              ),
-              if (user.isResponder)
-                Consumer<ResponderProvider>(
-                  builder: (context, responderProvider, _) {
-                    final mine = responderProvider.responderForUserId(user.id);
-                    final isAvailable = mine?.isAvailable ?? true;
 
                   return Card(
                     elevation: 0,
@@ -1009,8 +994,9 @@ void _showAccountSheet() {
                               child: const Text(
                                 'De-register as responder',
                                 style: TextStyle(color: Colors.red),
-                              ),
+                              ),			  
                             ),
+							  
                           ),
                         ],
                       ),
@@ -1024,49 +1010,6 @@ void _showAccountSheet() {
     },
   );
 }
-                    return Column(
-                      children: [
-                        SwitchListTile.adaptive(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Responder online'),
-                          value: isAvailable,
-                          onChanged: _toggleAvailability,
-                        ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              TextButton(
-                                onPressed: mine == null
-                                    ? null
-                                    : () {
-                                        Navigator.of(sheetContext).pop();
-                                        _openResponderProfile(mine);
-                                      },
-                                child: const Text('View my profile'),
-                              ),
-                              TextButton(
-                                onPressed: () async {
-                                  Navigator.of(sheetContext).pop();
-                                  await _deregisterResponder();
-                                },
-                                child: const Text('De-register as responder'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
 
 void _showAccessibilitySheet() {
   final settings = context.read<AppSettingsProvider>();
@@ -1179,7 +1122,7 @@ void _showAccessibilitySheet() {
                           }
                         } else {
                           settings.setNotificationsEnabled(false);
-                        }
+                        }		 
                         setModalState(() {});
                       },
                     ),
@@ -1354,9 +1297,7 @@ void _showCommsSimulationSheet() {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 16),
-
                  Container(
   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
   decoration: BoxDecoration(
@@ -1416,71 +1357,7 @@ void _showCommsSimulationSheet() {
                   // 🔧 Switch Cards
                   _buildCommsSwitch(
                     title: 'Simulate tower failure',
-                    icon: Icons.signal_cellular_off,
-                  Text('Comms Simulation', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<CommsMode>(
-                    initialValue: comms.mode,
-                    decoration: const InputDecoration(
-                      labelText: 'Delivery Mode',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: CommsMode.values
-                        .map(
-                          (mode) => DropdownMenuItem<CommsMode>(
-                            value: mode,
-                            child: Text(comms.modeLabel(mode)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        comms.setMode(value);
-                        setModalState(() {});
-                      }
-                    },
-                  ),
-                  if (comms.mode == CommsMode.meshSimulated ||
-                      comms.mode == CommsMode.satelliteSimulated)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade100,
-                          border: Border.all(color: Colors.orange.shade300),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.info, color: Colors.orange.shade700, size: 16),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'AI will use offline heuristic only',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: Colors.orange.shade900,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Simulate tower failure'),
-                    subtitle: comms.simulateTowerFailure
-                        ? Text(
-                            'AI will use offline heuristic only',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Colors.red.shade700,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                          )
-                        : null,
+                    icon: Icons.signal_cellular_off, 
                     value: comms.simulateTowerFailure,
                     onChanged: (v) {
                       comms.setSimulateTowerFailure(v);
@@ -1492,18 +1369,6 @@ void _showCommsSimulationSheet() {
                     title: 'Device supports satellite',
                     subtitle: 'Simulated capability',
                     icon: Icons.satellite_alt,
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Device supports satellite (simulated)'),
-                    subtitle: comms.deviceSupportsSatellite
-                        ? Text(
-                            'AI will use offline heuristic only',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Colors.red.shade700,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                          )
-                        : null,
                     value: comms.deviceSupportsSatellite,
                     onChanged: (v) {
                       comms.setDeviceSupportsSatellite(v);
@@ -1538,50 +1403,13 @@ void _showCommsSimulationSheet() {
                 ],
               ),
             ),
+			
           );
         },
       );
     },
   );
 }
-                  const SizedBox(height: 8),
-                  Text(
-                    'This simulation allows testing disaster/lockdown connectivity fallback without real mesh or satellite hardware.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  if (comms.forceOfflineAi)
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        border: Border.all(color: Colors.red.shade300),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.warning_amber, color: Colors.red.shade700, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Crisis AI is in offline mode. Gemini API will not be used.',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.red.shade900,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 
   Future<void> _deregisterResponder() async {
     final authProvider = context.read<AuthProvider>();
@@ -2000,8 +1828,8 @@ void _showCommsSimulationSheet() {
     final settings = context.watch<AppSettingsProvider>();
     final authProvider = context.watch<AuthProvider>();
     final commsProvider = context.watch<CommsProvider>();
-
-     // Build icon list dynamically
+		
+	 // Build icon list dynamically
         final List<IconData> iconList = [
           Icons.language,
           if (authProvider.currentUser?.isResponder == true)
@@ -2020,57 +1848,16 @@ void _showCommsSimulationSheet() {
           _openMap,
           _showAccountSheet,
         ];
+										 
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(settings.t('app_title'),style: TextStyle(fontWeight: FontWeight.bold),),
+        title: Text(settings.t('app_title')),
         centerTitle: true,
         elevation: 0,
         backgroundColor: Colors.red.shade700,
         actions: [
-          /*
-          Semantics(
-            button: true,
-            label: 'Switch app language',
-            child: IconButton(
-              icon: const Icon(Icons.language),
-              onPressed: _showLanguagePicker,
-              tooltip: settings.t('language'),
-            ),
-          ),
-            Semantics(
-              button: true,
-              label: 'Switch app language',
-              child: IconButton(
-                icon: const Icon(Icons.language),
-                onPressed: _showLanguagePicker,
-                tooltip: settings.t('language'),
-              ),
-            ),
-          Consumer<AuthProvider>(
-            builder: (context, authProvider, _) {
-              if (authProvider.currentUser?.isResponder != true) {
-                return const SizedBox.shrink();
-              }
-              return IconButton(
-                icon: const Icon(Icons.support_agent),
-                onPressed: _openResponderRequests,
-                tooltip: 'People needing help',
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.cell_tower),
-            onPressed: _showCommsSimulationSheet,
-            tooltip: 'Connectivity simulation',
-          ),
-          IconButton(
-            icon: const Icon(Icons.map),
-            onPressed: _openMap,
-            tooltip: 'Responders map',
-          ),*/
-         
-          IconButton(
+           IconButton(
             icon: const Icon(Icons.accessibility_new),
             onPressed: _showAccessibilitySheet,
             tooltip: 'Accessibility',
@@ -2093,16 +1880,7 @@ void _showCommsSimulationSheet() {
                       style: Theme.of(context).textTheme.headlineSmall,
                       textAlign: TextAlign.center,
                     ),
-                    /*
-                    Text(
-                      settings.t('emergency_subtitle'),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey[600],
-                      ),
-                    ),*/
-                     // Bottom section: Quick info
-              Padding(
+                    Padding(
         padding: const EdgeInsets.all(20.0),
         child: Consumer<ResponderProvider>(
           builder: (context, responderProvider, _) {
@@ -2126,8 +1904,12 @@ void _showCommsSimulationSheet() {
                         .toString(),
                     icon: Icons.location_on,
                   ),
-                ),]
-                ));})),
+                ),
+                ]
+                ));})),	
+                
+                						
+                    const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
@@ -2140,9 +1922,9 @@ void _showCommsSimulationSheet() {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                  
-                    TextField(
+                    
+                    const SizedBox(height: 8),
+					                    TextField(
   controller: _emergencyContextController,
   minLines: 1,
   maxLines: 3,
@@ -2156,68 +1938,42 @@ void _showCommsSimulationSheet() {
     filled: true,
     fillColor: Colors.red.shade50,
 
-    border: OutlineInputBorder(
+    border: OutlineInputBorder(												   
       borderRadius: BorderRadius.circular(16),
       borderSide: BorderSide(color: Colors.red.shade200),
     ),
 
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.red.shade300, width: 1.2),
+      borderSide: BorderSide(color: Colors.red.shade300, width: 1.2),													   
     ),
 
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(16),
       borderSide: BorderSide(color: Colors.red.shade600, width: 2),
+						  
     ),
 
     errorBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(16),
       borderSide: const BorderSide(color: Colors.red),
+					  
     ),
 
     labelStyle: TextStyle(color: Colors.red.shade700),
-    hintStyle: TextStyle(color: Colors.red.shade300),
-
+    hintStyle: TextStyle(color: Colors.red.shade300),				  
     contentPadding: const EdgeInsets.symmetric(
       horizontal: 16,
-      vertical: 14,
+      vertical: 14,									 
     ),
 
     prefixIcon: Icon(
-      Icons.warning_amber_rounded,
+      Icons.warning_amber_rounded,											
       color: Colors.red.shade400,
     ),
-  ),
+  ),					  
 ),
-                      controller: _emergencyContextController,
-                      minLines: 1,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        labelText: 'Emergency details (optional)',
-                        hintText:
-                            'Example: person drowning, rail-track hazard, swarm attack, limb trapped',
-                        border: const OutlineInputBorder(),
-                        suffixIcon: IconButton(
-                          tooltip: _voiceAudioPath == null
-                              ? 'Record a voice clip first'
-                              : (_includeVoiceClip
-                                  ? 'Detach voice clip from SOS'
-                                  : 'Attach voice clip to SOS'),
-                          onPressed: (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
-                              ? () {
-                                  setState(() {
-                                    _includeVoiceClip = !_includeVoiceClip;
-                                  });
-                                }
-                              : null,
-                          icon: Icon(
-                            _includeVoiceClip ? Icons.attach_file : Icons.attach_file_outlined,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
+										   
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Wrap(
@@ -2433,15 +2189,17 @@ void _showCommsSimulationSheet() {
                     ),
                     const SizedBox(height: 20),
                     // Location status
-                    Consumer<LocationProvider>(
+                      Consumer<LocationProvider>(
   builder: (context, locationProvider, _) {
+										 
     final isReady = locationProvider.hasLocation;
 
     return !isReady ?Container(
       margin: const EdgeInsets.symmetric( vertical: 10),
       padding: const EdgeInsets.symmetric( horizontal: 16,vertical: 14),
-      decoration: BoxDecoration(
+      decoration: BoxDecoration(								
         color: Colors.black,
+							  
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -2451,8 +2209,9 @@ void _showCommsSimulationSheet() {
             child: Row(
               children: [
                 Icon(
+															   
                   isReady ? Icons.location_on : Icons.location_off,
-                  color: isReady ? Colors.greenAccent : Colors.orangeAccent,
+                  color: isReady ? Colors.greenAccent : Colors.orangeAccent,					
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -2473,24 +2232,23 @@ void _showCommsSimulationSheet() {
           // RIGHT BUTTON
           if (!isReady)
             _actionChip(
-              label: "Fix",
+              label: "Fix",				  
               onTap: () async {
-  if (!locationProvider.hasLocation) {
+  if (!locationProvider.hasLocation) {												 
     await locationProvider.openPermissionSettings();
-  } else {
+  } else {												 
     await locationProvider.openLocationSettings();
   }
 }
             ),
         ],
       ),
-    ): SizedBox(height: 50);
+    ): SizedBox(height: 50);				  
   },
 ),
                   ],
                 ),
               ),
-
               // Center section: SOS Button
               Consumer<AuthProvider>(
                 builder: (context, authProvider, _) {
@@ -2508,12 +2266,70 @@ void _showCommsSimulationSheet() {
 
               const SizedBox(height: 20),
 
-             
-            ],
-          ),
-        ),
-      ),
-      bottomNavigationBar: AnimatedBottomNavigationBar(
+              // Bottom section: Quick info
+              Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  children: [
+                    // Responders status
+                    Consumer<ResponderProvider>(
+                      builder: (context, responderProvider, _) {
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.purple),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    settings.t('total_responders'),
+                                    style: Theme.of(context)
+                                        .textTheme.labelLarge,
+                                  ),
+                                  Text(
+                                    responderProvider.responders.length
+                                        .toString(),
+                                    style: Theme.of(context)
+                                        .textTheme.headlineSmall,
+                                  ),
+                                ],
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    settings.t('nearby_5km'),
+                                    style: Theme.of(context)
+                                        .textTheme.labelLarge,
+                                  ),
+                                  Text(
+                                    responderProvider.nearbyResponders.length
+                                        .toString(),
+                                    style: Theme.of(context)
+                                        .textTheme.headlineSmall
+                                        ?.copyWith(
+                                      color: Colors.purple,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              ]))),
+          bottomNavigationBar: AnimatedBottomNavigationBar(
             icons: iconList,
             activeIndex: _bottomNavIndex,
             gapLocation: GapLocation.none,
@@ -2530,7 +2346,7 @@ void _showCommsSimulationSheet() {
               actions[index]();
             },
           ),
-    );
+      );
   }
 }
 
