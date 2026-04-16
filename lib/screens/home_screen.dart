@@ -1,5 +1,5 @@
 import 'dart:async';
-
+import 'package:animated_bottom_navigation_bar/animated_bottom_navigation_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:provider/provider.dart';
@@ -19,6 +19,7 @@ import 'responder_registration_screen.dart';
 import 'responder_requests_screen.dart';
 import 'map_screen.dart';
 import '../widgets/sos_button.dart';
+import 'dart:ui';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -33,7 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<String> _notifiedRequestIds = <String>{};
   String _lastDeliveryRoute = 'Internet route';
   String? _currentSosRequestId; // Track current SOS for cancellation
-
+  int _bottomNavIndex = 0;
   @override
   void initState() {
     super.initState();
@@ -55,6 +56,8 @@ class _HomeScreenState extends State<HomeScreen> {
     await _syncPushProfile();
     _startResponderAlertPolling();
   }
+
+  
 
   Future<void> _syncPushProfile() async {
     final auth = context.read<AuthProvider>();
@@ -496,67 +499,219 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _showLanguagePicker() {
-    final settings = context.read<AppSettingsProvider>();
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) {
-        return RadioGroup<String>(
-          groupValue: settings.languageCode,
-          onChanged: (value) {
-            if (value != null) {
-              settings.setLanguage(value);
-            }
-            Navigator.of(sheetContext).pop();
-          },
-          child: ListView(
-            shrinkWrap: true,
-            children: settings.availableLanguageCodes
-                .map(
-                  (code) => RadioListTile<String>(
-                    value: code,
-                    title: Text(settings.languageLabel(code)),
-                  ),
-                )
-                .toList(),
+void _showLanguagePicker() {
+  final settings = context.read<AppSettingsProvider>();
+
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return Container(
+        padding: const EdgeInsets.only(top: 12, bottom: 20),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(24),
           ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            Container(
+              width: 40,
+              height: 5,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+
+            // Title
+            const Text(
+              "Select Language",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            const SizedBox(height: 4),
+
+            const Text(
+              "Choose your preferred language",
+              style: TextStyle(color: Colors.grey),
+            ),
+
+            const SizedBox(height: 16),
+
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: settings.availableLanguageCodes.length,
+                itemBuilder: (context, index) {
+                  final code = settings.availableLanguageCodes[index];
+                  final isSelected = settings.languageCode == code;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 4),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () {
+                        settings.setLanguage(code);
+                        Navigator.pop(sheetContext);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Colors.blue.withOpacity(0.1)
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isSelected
+                                ? Colors.blue
+                                : Colors.transparent,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            // Language Icon
+                            CircleAvatar(
+                              backgroundColor: Colors.red.shade50,
+                              child: const Icon(Icons.language,
+                                  color: Colors.red),
+                            ),
+
+                            const SizedBox(width: 12),
+
+                            // Language Label
+                            Expanded(
+                              child: Text(
+                                settings.languageLabel(code),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+
+                            // Selected check
+                            if (isSelected)
+                              const Icon(Icons.check_circle,
+                                  color: Colors.red),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+void _showAccountSheet() {
+  final authProvider = context.read<AuthProvider>();
+  final user = authProvider.currentUser;
+
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) {
+      if (user == null) {
+        return const Padding(
+          padding: EdgeInsets.all(20),
+          child: Center(child: Text('Not signed in')),
         );
-      },
-    );
-  }
+      }
 
-  void _showAccountSheet() {
-    final authProvider = context.read<AuthProvider>();
-    final user = authProvider.currentUser;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 🔹 Drag handle
+            Container(
+              height: 4,
+              width: 40,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade400,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
 
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) {
-        if (user == null) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('Not signed in'),
-          );
-        }
+            // 🔹 Profile Header
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  child: Text(
+                    user.displayName.isNotEmpty
+                        ? user.displayName[0].toUpperCase()
+                        : 'U',
+                    style: const TextStyle(fontSize: 20),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        user.displayName,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        user.email.isEmpty
+                            ? (user.phoneNumber ?? 'No email')
+                            : user.email,
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
 
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(user.displayName, style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 4),
-              Text(user.email.isEmpty ? (user.phoneNumber ?? 'No email') : user.email),
-              const SizedBox(height: 10),
-              Text(authProvider.isAnonymousUser ? 'Session: Anonymous' : 'Session: Registered'),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  if (authProvider.isAnonymousUser)
-                    OutlinedButton.icon(
+            const SizedBox(height: 16),
+
+            // 🔹 Session Chip
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Chip(
+                label: Text(
+                  authProvider.isAnonymousUser
+                      ? 'Anonymous Session'
+                      : 'Registered Account',
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // 🔹 Actions Section
+            Column(
+              children: [
+                if (authProvider.isAnonymousUser)
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
                       onPressed: () {
                         Navigator.of(sheetContext).pop();
                         _openAuthScreen();
@@ -564,8 +719,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       icon: const Icon(Icons.login),
                       label: const Text('Sign In / Create Account'),
                     ),
-                  if (!authProvider.isAnonymousUser)
-                    TextButton.icon(
+                  ),
+
+                if (!authProvider.isAnonymousUser)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
                       onPressed: () async {
                         Navigator.of(sheetContext).pop();
                         await _logoutRegisteredUser();
@@ -573,8 +732,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       icon: const Icon(Icons.logout),
                       label: const Text('Sign Out'),
                     ),
-                  if (user.isResponder)
-                    ElevatedButton.icon(
+                  ),
+
+                if (user.isResponder)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
                       onPressed: () {
                         Navigator.of(sheetContext).pop();
                         _openResponderRequests();
@@ -582,160 +745,452 @@ class _HomeScreenState extends State<HomeScreen> {
                       icon: const Icon(Icons.list_alt),
                       label: const Text('People Needing Help'),
                     ),
-                ],
-              ),
-              if (user.isResponder)
-                Consumer<ResponderProvider>(
-                  builder: (context, responderProvider, _) {
-                    final mine = responderProvider.responders
-                        .where((r) => r.userId == user.id)
-                        .toList();
-                    final isAvailable = mine.isEmpty ? true : mine.first.isAvailable;
+                  ),
+              ],
+            ),
 
-                    return Column(
-                      children: [
-                        SwitchListTile.adaptive(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Responder online'),
-                          value: isAvailable,
-                          onChanged: _toggleAvailability,
-                        ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            onPressed: () async {
-                              Navigator.of(sheetContext).pop();
-                              await _deregisterResponder();
-                            },
-                            child: const Text('De-register as responder'),
+            const SizedBox(height: 16),
+
+            // 🔹 Responder Section
+            if (user.isResponder)
+              Consumer<ResponderProvider>(
+                builder: (context, responderProvider, _) {
+                  final mine = responderProvider.responders
+                      .where((r) => r.userId == user.id)
+                      .toList();
+
+                  final isAvailable =
+                      mine.isEmpty ? true : mine.first.isAvailable;
+
+                  return Card(
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        children: [
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Responder Online'),
+                            value: isAvailable,
+                            onChanged: _toggleAvailability,
                           ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
+                              onPressed: () async {
+                                Navigator.of(sheetContext).pop();
+                                await _deregisterResponder();
+                              },
+                              child: const Text(
+                                'De-register as responder',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
 
-  void _showAccessibilitySheet() {
-    final settings = context.read<AppSettingsProvider>();
+void _showAccessibilitySheet() {
+  final settings = context.read<AppSettingsProvider>();
 
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SingleChildScrollView(
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (context, setModalState) {
+          return Container(
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              color: Colors.white,
+            ),
+            child: SingleChildScrollView(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                  Text(
-                    'Accessibility',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile.adaptive(
-                    title: const Text('Haptic vibration for SOS'),
-                    value: settings.hapticsEnabled,
-                    onChanged: (value) {
-                      settings.setHapticsEnabled(value);
-                      setModalState(() {});
-                    },
-                  ),
-                  SwitchListTile.adaptive(
-                    title: const Text('Flash light pulse on SOS'),
-                    subtitle: const Text('Uses device torch if available'),
-                    value: settings.sosFlashEnabled,
-                    onChanged: (value) {
-                      settings.setSosFlashEnabled(value);
-                      setModalState(() {});
-                    },
-                  ),
-                  SwitchListTile.adaptive(
-                    title: const Text('High contrast mode'),
-                    value: settings.highContrastEnabled,
-                    onChanged: (value) {
-                      settings.setHighContrastEnabled(value);
-                      setModalState(() {});
-                    },
-                  ),
-                  SwitchListTile.adaptive(
-                    title: const Text('Enable notifications'),
-                    subtitle: const Text('Local SOS status alerts'),
-                    value: settings.notificationsEnabled,
-                    onChanged: (value) async {
-                      if (value) {
-                        final granted = await NotificationService.requestPermissions();
-                        settings.setNotificationsEnabled(granted);
-                        if (!granted && mounted) {
-                          _showSnackBar('Notification permission not granted.');
-                        }
-                      } else {
-                        settings.setNotificationsEnabled(false);
-                      }
-                      setModalState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Expanded(child: Text('Text Size')),
-                      Text('${(settings.textScaleFactor * 100).round()}%'),
-                    ],
-                  ),
-                  Slider(
-                    min: 0.85,
-                    max: 1.6,
-                    value: settings.textScaleFactor,
-                    onChanged: (value) {
-                      settings.setTextScaleFactor(value);
-                      setModalState(() {});
-                    },
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () {
-                        settings.setTextScaleFactor(1.0);
+
+                    // Drag Handle
+                    Container(
+                      width: 40,
+                      height: 5,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+
+                    // 🔴 Header
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Colors.red, Colors.redAccent],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.accessibility_new,
+                              color: Colors.white),
+                          SizedBox(width: 10),
+                          Text(
+                            'Accessibility',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // 🔧 Settings Cards
+                    _buildSwitchCard(
+                      title: 'Haptic vibration for SOS',
+                      icon: Icons.vibration,
+                      value: settings.hapticsEnabled,
+                      onChanged: (v) {
+                        settings.setHapticsEnabled(v);
                         setModalState(() {});
                       },
-                      icon: const Icon(Icons.restart_alt),
-                      label: const Text('Reset text size'),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+
+                    _buildSwitchCard(
+                      title: 'Flash light pulse on SOS',
+                      subtitle: 'Uses device torch if available',
+                      icon: Icons.flashlight_on,
+                      value: settings.sosFlashEnabled,
+                      onChanged: (v) {
+                        settings.setSosFlashEnabled(v);
+                        setModalState(() {});
+                      },
+                    ),
+
+                    _buildSwitchCard(
+                      title: 'High contrast mode',
+                      icon: Icons.contrast,
+                      value: settings.highContrastEnabled,
+                      onChanged: (v) {
+                        settings.setHighContrastEnabled(v);
+                        setModalState(() {});
+                      },
+                    ),
+
+                    _buildSwitchCard(
+                      title: 'Enable notifications',
+                      subtitle: 'Local SOS status alerts',
+                      icon: Icons.notifications_active,
+                      value: settings.notificationsEnabled,
+                      onChanged: (value) async {
+                        if (value) {
+                          final granted =
+                              await NotificationService.requestPermissions();
+                          settings.setNotificationsEnabled(granted);
+
+                          if (!granted && mounted) {
+                            _showSnackBar(
+                                'Notification permission not granted.');
+                          }
+                        } else {
+                          settings.setNotificationsEnabled(false);
+                        }
+                        setModalState(() {});
+                      },
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // 🔤 Text Size Card
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.text_fields,
+                                  color: Colors.red),
+                              const SizedBox(width: 8),
+                              const Expanded(child: Text('Text Size')),
+                              Text(
+                                '${(settings.textScaleFactor * 100).round()}%',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                          SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              activeTrackColor: Colors.red,
+                              thumbColor: Colors.red,
+                            ),
+                            child: Slider(
+                              min: 0.85,
+                              max: 1.6,
+                              value: settings.textScaleFactor,
+                              onChanged: (value) {
+                                settings.setTextScaleFactor(value);
+                                setModalState(() {});
+                              },
+                            ),
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              onPressed: () {
+                                settings.setTextScaleFactor(1.0);
+                                setModalState(() {});
+                              },
+                              icon: const Icon(Icons.restart_alt,
+                                  color: Colors.red),
+                              label: const Text(
+                                'Reset',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    // 🧪 Test Buttons
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
                       children: [
-                        OutlinedButton.icon(
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
                           onPressed: () {
                             _announce(
                               'Accessibility test announcement. SOS button is centered below information cards.',
                             );
-                            _showSnackBar('Screen reader announcement sent.');
+                            _showSnackBar(
+                                'Screen reader announcement sent.');
                           },
                           icon: const Icon(Icons.record_voice_over),
-                          label: const Text('Test Voice Prompt'),
+                          label: const Text('Voice Test'),
                         ),
                         OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                          ),
                           onPressed: () async {
                             await _pulseFlash();
                             if (mounted) {
-                              _showSnackBar('Flash pulse test completed.');
+                              _showSnackBar(
+                                  'Flash pulse test completed.');
                             }
                           },
                           icon: const Icon(Icons.flashlight_on),
-                          label: const Text('Test Flash'),
+                          label: const Text('Flash Test'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+void _showCommsSimulationSheet() {
+  final comms = context.read<CommsProvider>();
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (context, setModalState) {
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+
+                  // Drag Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 5,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+
+                  // 🔴 Header
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Colors.red, Colors.redAccent],
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.wifi_tethering, color: Colors.white),
+                        SizedBox(width: 10),
+                        Text(
+                          'Comms Simulation',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                 Container(
+  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+  decoration: BoxDecoration(
+    color: Colors.grey.shade100,
+    borderRadius: BorderRadius.circular(18),
+    border: Border.all(
+      color: Colors.red.withOpacity(0.3),
+    ),
+  ),
+  child: DropdownButtonHideUnderline(
+    child: DropdownButton<CommsMode>(
+      value: comms.mode,
+      isExpanded: true,
+      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.red),
+      dropdownColor: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+
+      // Selected item display
+      selectedItemBuilder: (context) {
+        return CommsMode.values.map((mode) {
+          return Row(
+            children: [
+              Text(
+                comms.modeLabel(mode),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          );
+        }).toList();
+      },
+
+      items: CommsMode.values.map((mode) {
+        return DropdownMenuItem<CommsMode>(
+          value: mode,
+          child: Row(
+            children: [
+              Text(comms.modeLabel(mode)),
+            ],
+          ),
+        );
+      }).toList(),
+
+      onChanged: (value) {
+        if (value != null) {
+          comms.setMode(value);
+          setModalState(() {});
+        }
+      },
+    ),
+  ),
+),
+
+                  const SizedBox(height: 12),
+
+                  // 🔧 Switch Cards
+                  _buildCommsSwitch(
+                    title: 'Simulate tower failure',
+                    icon: Icons.signal_cellular_off,
+                    value: comms.simulateTowerFailure,
+                    onChanged: (v) {
+                      comms.setSimulateTowerFailure(v);
+                      setModalState(() {});
+                    },
+                  ),
+
+                  _buildCommsSwitch(
+                    title: 'Device supports satellite',
+                    subtitle: 'Simulated capability',
+                    icon: Icons.satellite_alt,
+                    value: comms.deviceSupportsSatellite,
+                    onChanged: (v) {
+                      comms.setDeviceSupportsSatellite(v);
+                      setModalState(() {});
+                    },
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // ⚠️ Info Box
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.red.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Icon(Icons.info_outline, color: Colors.red),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'This simulation allows testing disaster or lockdown connectivity fallback without real mesh or satellite hardware.',
+                            style: TextStyle(fontSize: 13),
+                          ),
                         ),
                       ],
                     ),
@@ -744,79 +1199,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           );
-          },
-        );
-      },
-    );
-  }
-
-  void _showCommsSimulationSheet() {
-    final comms = context.read<CommsProvider>();
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Comms Simulation', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<CommsMode>(
-                    initialValue: comms.mode,
-                    decoration: const InputDecoration(
-                      labelText: 'Delivery Mode',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: CommsMode.values
-                        .map(
-                          (mode) => DropdownMenuItem<CommsMode>(
-                            value: mode,
-                            child: Text(comms.modeLabel(mode)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        comms.setMode(value);
-                        setModalState(() {});
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Simulate tower failure'),
-                    value: comms.simulateTowerFailure,
-                    onChanged: (value) {
-                      comms.setSimulateTowerFailure(value);
-                      setModalState(() {});
-                    },
-                  ),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Device supports satellite (simulated)'),
-                    value: comms.deviceSupportsSatellite,
-                    onChanged: (value) {
-                      comms.setDeviceSupportsSatellite(value);
-                      setModalState(() {});
-                    },
-                  ),
-                  Text(
-                    'This simulation allows testing disaster/lockdown connectivity fallback without real mesh or satellite hardware.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
+        },
+      );
+    },
+  );
+}
 
   Future<void> _deregisterResponder() async {
     final authProvider = context.read<AuthProvider>();
@@ -905,13 +1292,34 @@ class _HomeScreenState extends State<HomeScreen> {
     final settings = context.watch<AppSettingsProvider>();
     final authProvider = context.watch<AuthProvider>();
 
+     // Build icon list dynamically
+        final List<IconData> iconList = [
+          Icons.language,
+          if (authProvider.currentUser?.isResponder == true)
+            Icons.support_agent,
+          Icons.cell_tower,
+          Icons.map,
+          Icons.account_circle,
+        ];
+
+        // Map actions
+        final List<VoidCallback> actions = [
+          _showLanguagePicker,
+          if (authProvider.currentUser?.isResponder == true)
+            _openResponderRequests,
+          _showCommsSimulationSheet,
+          _openMap,
+          _showAccountSheet,
+        ];
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(settings.t('app_title')),
+        title: Text(settings.t('app_title'),style: TextStyle(fontWeight: FontWeight.bold),),
         centerTitle: true,
         elevation: 0,
         backgroundColor: Colors.red.shade700,
         actions: [
+          /*
           Semantics(
             button: true,
             label: 'Switch app language',
@@ -942,11 +1350,12 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.map),
             onPressed: _openMap,
             tooltip: 'Responders map',
-          ),
+          ),*/
+         
           IconButton(
-            icon: const Icon(Icons.account_circle),
-            onPressed: _showAccountSheet,
-            tooltip: 'Account',
+            icon: const Icon(Icons.accessibility_new),
+            onPressed: _showAccessibilitySheet,
+            tooltip: 'Accessibility',
           ),
         ],
       ),
@@ -966,15 +1375,41 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: Theme.of(context).textTheme.headlineSmall,
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 10),
+                    /*
                     Text(
                       settings.t('emergency_subtitle'),
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Colors.grey[600],
                       ),
-                    ),
-                    const SizedBox(height: 12),
+                    ),*/
+                     // Bottom section: Quick info
+              Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Consumer<ResponderProvider>(
+          builder: (context, responderProvider, _) {
+            return IntrinsicHeight(
+              child :Row(
+              children: [
+                Expanded(
+                  child: _actionCard(
+                    title: settings.t('total_responders'),
+                    value:
+                        responderProvider.responders.length.toString(),
+                    icon: Icons.people,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _actionCard(
+                    title: settings.t('nearby_5km'),
+                    value: responderProvider
+                        .nearbyResponders.length
+                        .toString(),
+                    icon: Icons.location_on,
+                  ),
+                ),]
+                ));})),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
@@ -987,125 +1422,111 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: _showAccessibilitySheet,
-                            icon: const Icon(Icons.accessibility_new),
-                            label: const Text('Accessibility'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _openMap,
-                            icon: const Icon(Icons.map),
-                            label: const Text('Map'),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
+                  
                     TextField(
-                      controller: _emergencyContextController,
-                      minLines: 1,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Emergency details (optional)',
-                        hintText:
-                            'Example: elderly person fell, flood nearby, child missing, no transport',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
+  controller: _emergencyContextController,
+  minLines: 1,
+  maxLines: 3,
+  cursorColor: Colors.red,
+
+  decoration: InputDecoration(
+    labelText: 'Emergency details (optional)',
+    hintText:
+        'Example: elderly person fell, flood nearby, child missing, no transport',
+
+    filled: true,
+    fillColor: Colors.red.shade50,
+
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide(color: Colors.red.shade200),
+    ),
+
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide(color: Colors.red.shade300, width: 1.2),
+    ),
+
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide(color: Colors.red.shade600, width: 2),
+    ),
+
+    errorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: const BorderSide(color: Colors.red),
+    ),
+
+    labelStyle: TextStyle(color: Colors.red.shade700),
+    hintStyle: TextStyle(color: Colors.red.shade300),
+
+    contentPadding: const EdgeInsets.symmetric(
+      horizontal: 16,
+      vertical: 14,
+    ),
+
+    prefixIcon: Icon(
+      Icons.warning_amber_rounded,
+      color: Colors.red.shade400,
+    ),
+  ),
+),
                     // Location status
                     Consumer<LocationProvider>(
-                      builder: (context, locationProvider, _) {
-                        return Semantics(
-                          label: locationProvider.hasLocation
-                              ? 'Location status ready'
-                              : 'Location status not ready',
-                          child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: locationProvider.hasLocation
-                                ? Colors.green.shade50
-                                : Colors.orange.shade50,
-                            border: Border.all(
-                              color: locationProvider.hasLocation
-                                  ? Colors.green
-                                  : Colors.orange,
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                locationProvider.hasLocation
-                                    ? Icons.location_on
-                                    : Icons.location_off,
-                                color: locationProvider.hasLocation
-                                    ? Colors.green
-                                    : Colors.orange,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                locationProvider.hasLocation
-                                    ? settings.t('location_ready')
-                                    : settings.t('location_not_ready'),
-                                style: TextStyle(
-                                  color: Colors.black87,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ));
-                      },
+  builder: (context, locationProvider, _) {
+    final isReady = locationProvider.hasLocation;
+
+    return !isReady ?Container(
+      margin: const EdgeInsets.symmetric( vertical: 10),
+      padding: const EdgeInsets.symmetric( horizontal: 16,vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          // LEFT TEXT + ICON
+          Expanded(
+            child: Row(
+              children: [
+                Icon(
+                  isReady ? Icons.location_on : Icons.location_off,
+                  color: isReady ? Colors.greenAccent : Colors.orangeAccent,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    isReady
+                        ? settings.t('location_ready')
+                        : settings.t('location_not_ready'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
                     ),
-                    Consumer<LocationProvider>(
-                      builder: (context, locationProvider, _) {
-                        if (locationProvider.hasLocation) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Wrap(
-                            alignment: WrapAlignment.center,
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              ElevatedButton.icon(
-                                onPressed: () async {
-                                  await locationProvider.openLocationSettings();
-                                },
-                                icon: const Icon(Icons.gps_fixed),
-                                label: const Text('Turn On Location'),
-                              ),
-                              OutlinedButton.icon(
-                                onPressed: () async {
-                                  await locationProvider.openPermissionSettings();
-                                },
-                                icon: const Icon(Icons.app_settings_alt),
-                                label: const Text('Grant Permission'),
-                              ),
-                              TextButton.icon(
-                                onPressed: () async {
-                                  await locationProvider.refreshLocationStatus(
-                                    fetchLocation: true,
-                                  );
-                                },
-                                icon: const Icon(Icons.refresh),
-                                label: const Text('Retry'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // RIGHT BUTTON
+          if (!isReady)
+            _actionChip(
+              label: "Fix",
+              onTap: () async {
+  if (!locationProvider.hasLocation) {
+    await locationProvider.openPermissionSettings();
+  } else {
+    await locationProvider.openLocationSettings();
+  }
+}
+            ),
+        ],
+      ),
+    ): SizedBox(height: 50);
+  },
+),
                   ],
                 ),
               ),
@@ -1127,72 +1548,236 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 20),
 
-              // Bottom section: Quick info
-              Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  children: [
-                    // Responders status
-                    Consumer<ResponderProvider>(
-                      builder: (context, responderProvider, _) {
-                        return Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.purple.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.purple),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    settings.t('total_responders'),
-                                    style: Theme.of(context)
-                                        .textTheme.labelLarge,
-                                  ),
-                                  Text(
-                                    responderProvider.responders.length
-                                        .toString(),
-                                    style: Theme.of(context)
-                                        .textTheme.headlineSmall,
-                                  ),
-                                ],
-                              ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    settings.t('nearby_5km'),
-                                    style: Theme.of(context)
-                                        .textTheme.labelLarge,
-                                  ),
-                                  Text(
-                                    responderProvider.nearbyResponders.length
-                                        .toString(),
-                                    style: Theme.of(context)
-                                        .textTheme.headlineSmall
-                                        ?.copyWith(
-                                      color: Colors.purple,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
+             
             ],
           ),
         ),
       ),
+      bottomNavigationBar: AnimatedBottomNavigationBar(
+            icons: iconList,
+            activeIndex: _bottomNavIndex,
+            gapLocation: GapLocation.none,
+            notchSmoothness: NotchSmoothness.verySmoothEdge,
+            backgroundColor: Colors.red.shade700,
+            activeColor: Colors.white,
+            inactiveColor: Colors.white70,
+            onTap: (index) {
+              setState(() {
+                _bottomNavIndex = index;
+              });
+
+              // Trigger same AppBar actions
+              actions[index]();
+            },
+          ),
     );
   }
+}
+
+Widget _actionCard({
+  required String title,
+  required String value,
+  required IconData icon,
+}) {
+  return CustomPaint(
+    painter: DashedBorderPainter(),
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.red.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            size: 32,
+            color: Colors.red.shade700,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.red.shade600,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              color: Colors.red.shade900,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ---------------- DASHED BORDER ----------------
+class DashedBorderPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    const dashWidth = 6;
+    const dashSpace = 4;
+
+    final paint = Paint()
+      ..color = Colors.red
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+
+    final rect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(20),
+    );
+
+    final path = Path()..addRRect(rect);
+    final metrics = path.computeMetrics();
+
+    for (var metric in metrics) {
+      double distance = 0;
+      while (distance < metric.length) {
+        final next = distance + dashWidth;
+        canvas.drawPath(
+          metric.extractPath(distance, next),
+          paint,
+        );
+        distance = next + dashSpace;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => false;
+}
+
+Widget _styledButton({
+  required String label,
+  required IconData icon,
+  required VoidCallback onPressed,
+}) {
+  return OutlinedButton.icon(
+    onPressed: onPressed,
+    icon: Icon(icon, size: 20),
+    label: Text(label),
+    style: OutlinedButton.styleFrom(
+      padding: const EdgeInsets.all(8),
+      
+      // Rounded modern shape
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+
+      // Border style
+      side: BorderSide(
+        color: Colors.red.shade400,
+        width: 1.5,
+      ),
+
+      // Background (light red)
+      backgroundColor: Colors.red.shade50,
+
+      // Text & icon color
+      foregroundColor: Colors.red.shade700,
+
+      // Subtle elevation feel
+      shadowColor: Colors.red.withOpacity(0.2),
+      elevation: 2,
+    ),
+  );
+}
+
+
+Widget _actionChip({
+  required String label,
+  required VoidCallback onTap,
+}) {
+
+  return GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildSwitchCard({
+  required String title,
+  String? subtitle,
+  required IconData icon,
+  required bool value,
+  required Function(bool) onChanged,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Container(
+      decoration: BoxDecoration(
+        color: value ? Colors.red.withOpacity(0.08) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: value ? Colors.red : Colors.transparent,
+        ),
+      ),
+      child: SwitchListTile.adaptive(
+        value: value,
+        onChanged: onChanged,
+        title: Text(title),
+        subtitle: subtitle != null ? Text(subtitle) : null,
+        secondary: Icon(icon, color: Colors.red),
+        activeColor: Colors.red,
+      ),
+    ),
+  );
+}
+
+Widget _buildCommsSwitch({
+  required String title,
+  String? subtitle,
+  required IconData icon,
+  required bool value,
+  required Function(bool) onChanged,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Container(
+      decoration: BoxDecoration(
+        color: value ? Colors.red.withOpacity(0.08) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: value ? Colors.red : Colors.transparent,
+        ),
+      ),
+      child: SwitchListTile.adaptive(
+        value: value,
+        onChanged: onChanged,
+        title: Text(title),
+        subtitle: subtitle != null ? Text(subtitle) : null,
+        secondary: Icon(icon, color: Colors.red),
+        activeColor: Colors.red,
+      ),
+    ),
+  );
 }
