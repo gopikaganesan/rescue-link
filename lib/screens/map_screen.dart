@@ -71,6 +71,9 @@ class _MapScreenState extends State<MapScreen> {
       widget.targetLatitude != null && widget.targetLongitude != null;
 
   Future<void> _openExternalNavigation() async {
+    print("==========================================================================================================================================================");
+    print(widget.targetLatitude);
+    print(widget.targetLongitude);
     if (!_hasTarget) {
       return;
     }
