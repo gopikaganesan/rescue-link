@@ -1,8 +1,75 @@
 const admin = require('firebase-admin');
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions');
+const { SpeechClient } = require('@google-cloud/speech');
 
 admin.initializeApp();
+const speechClient = new SpeechClient();
+
+exports.transcribeEmergencyAudio = onCall(
+  {
+    cors: true,
+    timeoutSeconds: 60,
+    maxInstances: 10,
+  },
+  async (request) => {
+    const audioBase64 = String(request.data?.audioBase64 || '').trim();
+    const languageCode = String(request.data?.languageCode || 'en-IN').trim();
+    const alternativeLanguageCodes = Array.isArray(request.data?.alternativeLanguageCodes)
+      ? request.data.alternativeLanguageCodes
+          .map((code) => String(code || '').trim())
+          .filter((code) => code)
+      : [];
+
+    if (!audioBase64) {
+      throw new HttpsError('invalid-argument', 'audioBase64 is required.');
+    }
+
+    try {
+      const [response] = await speechClient.recognize({
+        config: {
+          encoding: 'LINEAR16',
+          sampleRateHertz: 16000,
+          languageCode,
+          alternativeLanguageCodes,
+          enableAutomaticPunctuation: true,
+          model: 'latest_long',
+        },
+        audio: {
+          content: audioBase64,
+        },
+      });
+
+      const alternatives = (response.results || [])
+        .map((result) => result.alternatives && result.alternatives[0])
+        .filter(Boolean);
+
+      const transcript = alternatives
+        .map((alt) => alt.transcript || '')
+        .join(' ')
+        .trim();
+
+      let confidence = 0;
+      if (alternatives.length > 0) {
+        const total = alternatives
+          .map((alt) => Number(alt.confidence || 0))
+          .reduce((sum, value) => sum + value, 0);
+        confidence = total / alternatives.length;
+      }
+
+      return {
+        transcript,
+        confidence,
+      };
+    } catch (error) {
+      logger.error('Cloud transcription failed', {
+        message: error?.message,
+      });
+      throw new HttpsError('internal', 'Cloud transcription failed.');
+    }
+  }
+);
 
 const INCIDENT_TOPIC_RULES = [
   {
@@ -71,7 +138,10 @@ function topicsForRequest(requestData) {
 
 async function sendTopicAlert(topic, requestData) {
   const title = `New SOS: ${requestData.category || 'Emergency'}`;
-  const body = `${requestData.summary || 'Emergency request received.'} (${requestData.severity || 'medium'})`;
+  const rawMessage = String(requestData.originalMessage || '').trim();
+  const body = rawMessage
+    ? `${rawMessage} (${requestData.severity || 'medium'})`
+    : `${requestData.summary || 'Emergency request received.'} (${requestData.severity || 'medium'})`;
 
   await admin.messaging().send({
     topic,
@@ -84,6 +154,15 @@ async function sendTopicAlert(topic, requestData) {
       requestCategory: String(requestData.category || ''),
       severity: String(requestData.severity || ''),
       recommendedSkill: String(requestData.recommendedSkill || ''),
+      originalMessage: String(requestData.originalMessage || ''),
+      voiceTranscript: String(requestData.voiceTranscript || ''),
+      voiceAudioUrl: String(requestData.voiceAudioUrl || ''),
+      voiceAudioType: String(requestData.voiceAudioType || ''),
+      attachmentUrl: String(requestData.attachmentUrl || ''),
+      attachmentType: String(requestData.attachmentType || ''),
+      aiConfidence: String(requestData.aiConfidence ?? ''),
+      humanReviewRecommended: String(requestData.humanReviewRecommended === true),
+      forcedCriticalByUser: String(requestData.forcedCriticalByUser === true),
       requesterName: String(requestData.requesterName || ''),
       latitude: String(requestData.latitude || ''),
       longitude: String(requestData.longitude || ''),

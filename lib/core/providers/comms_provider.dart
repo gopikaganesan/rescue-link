@@ -16,6 +16,14 @@ class CommsProvider extends ChangeNotifier {
   bool get simulateTowerFailure => _simulateTowerFailure;
   bool get deviceSupportsSatellite => _deviceSupportsSatellite;
 
+  // In simulated degraded-network scenarios, force local AI fallback.
+  bool get forceOfflineAi {
+    return _simulateTowerFailure ||
+        _deviceSupportsSatellite ||
+        _mode == CommsMode.meshSimulated ||
+        _mode == CommsMode.satelliteSimulated;
+  }
+
   void setMode(CommsMode value) {
     if (_mode == value) {
       return;
