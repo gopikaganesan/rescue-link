@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "RescueLink (Chrome + Env)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "chrome",
+      "args": [
+        "--dart-define-from-file=env/dev.json"
+      ]
+    },
+    {
+      "name": "RescueLink (Windows + Env)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "windows",
+      "args": [
+        "--dart-define-from-file=env/dev.json"
+      ]
+    },
+    {
+      "name": "RescueLink (Android + Env)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "android",
+      "args": [
+        "--dart-define-from-file=env/dev.json"
+      ]
+    },
+    {
+      "name": "RescueLink (iOS + Env)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "ios",
+      "args": [
+        "--dart-define-from-file=env/dev.json"
+      ]
+    }
+  ]
+}
