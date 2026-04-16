@@ -26,6 +26,12 @@
 - Media appears as compact attachment cards with quick actions
 - Photo preview and voice clip playback are available before sending SOS
 
+✅ **Group Chat AI + Multimodal**:
+- Group chat supports gallery image, camera image, and voice clip attachments
+- Inline voice playback is available in chat bubbles with progress
+- Ask AI is available from the chat composer with recent context
+- Role-specific chat controls are available (victim: delete chat, responder: leave chat)
+
 ✅ **Pluggable Media Upload Setup**:
 - Media upload provider abstraction added (`firebase` or `cloudinary`)
 - Runtime flags support free-tier friendly Cloudinary integration without changing app flow
@@ -68,6 +74,9 @@
 	- capture photo -> preview -> send
 	- record voice clip -> playback -> send
 	- responder side media visibility and playback
+	- group chat image and voice attachment visibility
+	- group chat inline voice playback controls
+	- victim delete chat and responder leave chat behavior
 
 ## Suggested Start Order
 1. Firebase project + config files

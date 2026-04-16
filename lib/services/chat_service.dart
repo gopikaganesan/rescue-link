@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
@@ -11,6 +13,7 @@ class ChatService {
   static const String _aiUid = 'rescuelink_ai';
   static const String _aiDisplayName = 'RescueLink AI';
   static const String _geminiModel = 'gemini-1.5-flash';
+  static const Duration _geminiTimeout = Duration(seconds: 12);
 
   final FirebaseFirestore _firestore;
   final String _geminiApiKey;
@@ -23,7 +26,8 @@ class ChatService {
   CollectionReference<Map<String, dynamic>> get _chats =>
       _firestore.collection('chats');
 
-  DocumentReference<Map<String, dynamic>> chatRef(String sosId) => _chats.doc(sosId);
+  DocumentReference<Map<String, dynamic>> chatRef(String sosId) =>
+      _chats.doc(sosId);
 
   CollectionReference<Map<String, dynamic>> messagesRef(String sosId) =>
       chatRef(sosId).collection('messages');
@@ -89,21 +93,21 @@ class ChatService {
   Future<void> createChatFromSosPayload({
     required Map<String, dynamic> sosPayload,
   }) async {
-    final sosId = (sosPayload['id'] as String?) ??
-        (sosPayload['sosId'] as String?) ??
-        '';
+    final sosId =
+        (sosPayload['id'] as String?) ?? (sosPayload['sosId'] as String?) ?? '';
     final victimUid = (sosPayload['requesterUserId'] as String?) ??
         (sosPayload['victimUid'] as String?) ??
         '';
     final victimName = (sosPayload['requesterName'] as String?) ??
-      (sosPayload['victimName'] as String?);
+        (sosPayload['victimName'] as String?);
 
     if (sosId.isEmpty || victimUid.isEmpty) {
       return;
     }
 
-    final sosMessage =
-        (sosPayload['originalMessage'] as String?) ?? (sosPayload['summary'] as String?) ?? '';
+    final sosMessage = (sosPayload['originalMessage'] as String?) ??
+        (sosPayload['summary'] as String?) ??
+        '';
 
     await createChatOnSos(
       sosId: sosId,
@@ -239,11 +243,11 @@ class ChatService {
 
     final snapshot = await _withFirestoreRetry(
       () => _firestore
-        .collection('emergency_requests')
-        .where('requesterUserId', isEqualTo: safeVictimUid)
-        .orderBy('createdAt', descending: true)
-        .limit(20)
-        .get(),
+          .collection('emergency_requests')
+          .where('requesterUserId', isEqualTo: safeVictimUid)
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get(),
     );
 
     for (final doc in snapshot.docs) {
@@ -254,7 +258,8 @@ class ChatService {
       }
 
       final sosId = doc.id;
-      final existingChat = await _withFirestoreRetry(() => chatRef(sosId).get());
+      final existingChat =
+          await _withFirestoreRetry(() => chatRef(sosId).get());
       if (existingChat.exists) {
         return sosId;
       }
@@ -333,7 +338,9 @@ class ChatService {
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> watchMessages(String sosId) {
-    return messagesRef(sosId).orderBy('createdAt', descending: true).snapshots();
+    return messagesRef(sosId)
+        .orderBy('createdAt', descending: true)
+        .snapshots();
   }
 
   bool shouldTriggerAiFromText(String text) {
@@ -351,7 +358,8 @@ class ChatService {
 
     await _ensureAiParticipantPresent(safeSosId);
 
-    final chatSnapshot = await _withFirestoreRetry(() => chatRef(safeSosId).get());
+    final chatSnapshot =
+        await _withFirestoreRetry(() => chatRef(safeSosId).get());
     final chatData = chatSnapshot.data();
     if (chatData == null) {
       return false;
@@ -397,7 +405,7 @@ class ChatService {
     return true;
   }
 
-  Future<void> sendMessageToAI({
+  Future<bool> sendMessageToAI({
     required String sosId,
     required String requesterUid,
     required String requesterName,
@@ -415,25 +423,26 @@ class ChatService {
     );
 
     if (safeSosId.isEmpty || safeRequesterUid.isEmpty || safePrompt.isEmpty) {
-      return;
+      return false;
     }
 
     await _ensureAiParticipantPresent(safeSosId);
 
-    final chatSnapshot = await _withFirestoreRetry(() => chatRef(safeSosId).get());
+    final chatSnapshot =
+        await _withFirestoreRetry(() => chatRef(safeSosId).get());
     final chatData = chatSnapshot.data();
     if (chatData == null) {
-      return;
+      return false;
     }
 
     final status = (chatData['status'] as String?) ?? 'active';
     if (status == 'cancelled') {
-      return;
+      return false;
     }
 
     final participantUids = _extractParticipantUids(chatData);
     if (!participantUids.contains(safeRequesterUid)) {
-      return;
+      return false;
     }
 
     final recentMessages = await _fetchRecentMessages(safeSosId, limit: 20);
@@ -450,7 +459,7 @@ class ChatService {
 
     final aiText = await _generateAiReply(prompt);
     if (aiText.isEmpty) {
-      return;
+      return false;
     }
 
     await _sendAiMessage(
@@ -459,6 +468,7 @@ class ChatService {
       trigger: askReason,
       requesterUid: safeRequesterUid,
     );
+    return true;
   }
 
   Future<void> sendMessage({
@@ -467,6 +477,11 @@ class ChatService {
     required String senderRole,
     required String senderName,
     required String text,
+    String? attachmentUrl,
+    String? attachmentType,
+    String? voiceAudioUrl,
+    String? voiceAudioType,
+    String? voiceTranscript,
   }) async {
     final safeSenderUid = senderUid.trim();
     if (safeSenderUid.isEmpty) {
@@ -474,50 +489,69 @@ class ChatService {
     }
 
     final trimmed = text.trim();
-    if (trimmed.isEmpty) {
+    final safeAttachmentUrl = attachmentUrl?.trim();
+    final hasAttachment =
+        safeAttachmentUrl != null && safeAttachmentUrl.isNotEmpty;
+    final safeVoiceAudioUrl = voiceAudioUrl?.trim();
+    final hasVoiceAudio =
+        safeVoiceAudioUrl != null && safeVoiceAudioUrl.isNotEmpty;
+    final safeVoiceTranscript = voiceTranscript?.trim();
+    if (trimmed.isEmpty && !hasAttachment) {
       return;
     }
 
-    final safeText = trimmed.length > _maxMessageLength
-        ? trimmed.substring(0, _maxMessageLength)
-        : trimmed;
+    final safeText = trimmed.isEmpty
+        ? 'Attachment shared'
+        : trimmed.length > _maxMessageLength
+            ? trimmed.substring(0, _maxMessageLength)
+            : trimmed;
     final safeRole = _normalizeRole(senderRole);
 
     final chat = chatRef(sosId);
     final messageDoc = messagesRef(sosId).doc();
 
-    await _firestore.runTransaction((transaction) async {
-      final chatSnapshot = await transaction.get(chat);
-      final chatData = chatSnapshot.data() ?? <String, dynamic>{};
-      final status = (chatData['status'] as String?) ?? 'active';
-      if (status == 'cancelled') {
-        return;
-      }
+    await _withFirestoreRetry(() async {
+      await _firestore.runTransaction((transaction) async {
+        final chatSnapshot = await transaction.get(chat);
+        final chatData = chatSnapshot.data() ?? <String, dynamic>{};
+        final status = (chatData['status'] as String?) ?? 'active';
+        if (status == 'cancelled') {
+          return;
+        }
 
-      final participantUids = _extractParticipantUids(chatData);
-      if (!participantUids.contains(safeSenderUid)) {
-        return;
-      }
+        final participantUids = _extractParticipantUids(chatData);
+        if (!participantUids.contains(safeSenderUid)) {
+          return;
+        }
 
-      final hasDedicatedParticipantUids =
-          (chatData['participantUids'] as List<dynamic>?) != null;
-      if (!hasDedicatedParticipantUids) {
-        transaction.set(
-          chat,
-          <String, dynamic>{
-            'participantUids': participantUids.toList(),
-          },
-          SetOptions(merge: true),
-        );
-      }
+        final hasDedicatedParticipantUids =
+            (chatData['participantUids'] as List<dynamic>?) != null;
+        if (!hasDedicatedParticipantUids) {
+          transaction.set(
+            chat,
+            <String, dynamic>{
+              'participantUids': participantUids.toList(),
+            },
+            SetOptions(merge: true),
+          );
+        }
 
-      transaction.set(messageDoc, <String, dynamic>{
-        'text': safeText,
-        'senderUid': safeSenderUid,
-        'senderRole': safeRole,
-        'senderName': _safeDisplayName(senderName, fallback: 'Unknown'),
-        'createdAt': FieldValue.serverTimestamp(),
-        'type': 'text',
+        transaction.set(messageDoc, <String, dynamic>{
+          'text': safeText,
+          'senderUid': safeSenderUid,
+          'senderRole': safeRole,
+          'senderName': _safeDisplayName(senderName, fallback: 'Unknown'),
+          'createdAt': FieldValue.serverTimestamp(),
+          'type': 'text',
+          if (hasAttachment) 'attachmentUrl': safeAttachmentUrl,
+          if (hasAttachment)
+            'attachmentType': (attachmentType ?? 'image').trim(),
+          if (hasVoiceAudio) 'voiceAudioUrl': safeVoiceAudioUrl,
+          if (hasVoiceAudio)
+            'voiceAudioType': (voiceAudioType ?? 'audio/wav').trim(),
+          if (safeVoiceTranscript != null && safeVoiceTranscript.isNotEmpty)
+            'voiceTranscript': safeVoiceTranscript,
+        });
       });
     });
   }
@@ -537,13 +571,15 @@ class ChatService {
         return;
       }
 
-      final rawParticipants = data['participants'] as List<dynamic>? ?? <dynamic>[];
+      final rawParticipants =
+          data['participants'] as List<dynamic>? ?? <dynamic>[];
       final participants = rawParticipants
           .whereType<Map>()
           .map((entry) => Map<String, dynamic>.from(entry))
           .toList();
 
-      final alreadyJoined = participants.any((entry) => entry['uid'] == responderUid);
+      final alreadyJoined =
+          participants.any((entry) => entry['uid'] == responderUid);
       if (alreadyJoined) {
         return;
       }
@@ -604,7 +640,8 @@ class ChatService {
 
       presence[safeResponderUid] = isOnline;
 
-      final onlineCount = presence.values.where((value) => value == true).length;
+      final onlineCount =
+          presence.values.where((value) => value == true).length;
 
       transaction.set(
         ref,
@@ -645,7 +682,8 @@ class ChatService {
       }
 
       presence.remove(safeResponderUid);
-      final onlineCount = presence.values.where((value) => value == true).length;
+      final onlineCount =
+          presence.values.where((value) => value == true).length;
 
       transaction.set(
         ref,
@@ -655,6 +693,58 @@ class ChatService {
         },
         SetOptions(merge: true),
       );
+    });
+  }
+
+  Future<void> leaveResponder({
+    required String sosId,
+    required String responderUid,
+  }) async {
+    final ref = chatRef(sosId);
+    final safeResponderUid = responderUid.trim();
+    if (safeResponderUid.isEmpty) {
+      return;
+    }
+
+    await _withFirestoreRetry(() async {
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(ref);
+        final data = snapshot.data() ?? <String, dynamic>{};
+
+        final participants = _asMapList(data['participants']);
+        final updatedParticipants = participants
+            .where((entry) => !((entry['uid'] as String?) == safeResponderUid &&
+                (entry['role'] as String?) == 'responder' &&
+                entry['isAi'] != true))
+            .toList();
+
+        if (updatedParticipants.length == participants.length) {
+          return;
+        }
+
+        final updatedParticipantUids = updatedParticipants
+            .map((entry) => entry['uid'] as String?)
+            .whereType<String>()
+            .toSet();
+
+        final presence = data['responderPresence'] is Map
+            ? Map<String, dynamic>.from(data['responderPresence'] as Map)
+            : <String, dynamic>{};
+        presence.remove(safeResponderUid);
+        final onlineCount =
+            presence.values.where((value) => value == true).length;
+
+        transaction.set(
+          ref,
+          <String, dynamic>{
+            'participants': updatedParticipants,
+            'participantUids': updatedParticipantUids.toList(),
+            'responderPresence': presence,
+            'onlineCount': onlineCount,
+          },
+          SetOptions(merge: true),
+        );
+      });
     });
   }
 
@@ -867,7 +957,8 @@ Respond in concise plain text with:
 
     try {
       final model = GenerativeModel(model: _geminiModel, apiKey: _geminiApiKey);
-      final response = await model.generateContent(<Content>[Content.text(prompt)]);
+      final response = await model.generateContent(
+          <Content>[Content.text(prompt)]).timeout(_geminiTimeout);
       final text = response.text?.trim() ?? '';
       if (text.isEmpty) {
         return _fallbackAiReply();
@@ -938,7 +1029,8 @@ Respond in concise plain text with:
     return prompt;
   }
 
-  List<Map<String, dynamic>> _extractOverviewMedia(Map<String, dynamic> sosPayload) {
+  List<Map<String, dynamic>> _extractOverviewMedia(
+      Map<String, dynamic> sosPayload) {
     final media = <Map<String, dynamic>>[];
 
     final attachmentUrl = sosPayload['attachmentUrl'] as String?;

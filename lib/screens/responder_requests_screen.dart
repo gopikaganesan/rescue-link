@@ -10,6 +10,7 @@ import '../core/providers/emergency_request_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/services/responder_matching_service.dart';
+import 'group_chat_screen.dart';
 import 'map_screen.dart';
 
 class ResponderRequestsScreen extends StatefulWidget {
@@ -149,6 +150,17 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Help request accepted.')),
+    );
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GroupChatScreen(
+          sosId: request.id,
+          currentUserId: auth.currentUser!.id,
+          currentUserName: auth.currentUser!.displayName,
+          currentUserRole: 'responder',
+        ),
+      ),
     );
   }
 

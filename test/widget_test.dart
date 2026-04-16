@@ -22,7 +22,8 @@ void main() {
 
     expect(find.text('SOS'), findsOneWidget);
     await tester.tap(find.byType(SOSButton));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
 
     expect(tapped, isTrue);
   });
