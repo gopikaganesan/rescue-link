@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/models/responder_model.dart';
+import 'responder_profile_screen.dart';
 
 class MapScreen extends StatefulWidget {
   final double? targetLatitude;
@@ -71,6 +72,9 @@ class _MapScreenState extends State<MapScreen> {
       widget.targetLatitude != null && widget.targetLongitude != null;
 
   Future<void> _openExternalNavigation() async {
+    print("==========================================================================================================================================================");
+    print(widget.targetLatitude);
+    print(widget.targetLongitude);
     if (!_hasTarget) {
       return;
     }
@@ -145,6 +149,23 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     return markers;
+  }
+
+  void _openResponderProfile(
+    BuildContext context,
+    ResponderModel responder,
+    double viewerLatitude,
+    double viewerLongitude,
+  ) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ResponderProfileScreen(
+          responder: responder,
+          viewerLatitude: viewerLatitude,
+          viewerLongitude: viewerLongitude,
+        ),
+      ),
+    );
   }
 
   @override
@@ -337,7 +358,7 @@ class _MapScreenState extends State<MapScreen> {
                           )
                         else
                           SizedBox(
-                            height: 100,
+                            height: 132,
                             child: ListView.builder(
                               scrollDirection: Axis.horizontal,
                               itemCount:
@@ -350,54 +371,89 @@ class _MapScreenState extends State<MapScreen> {
                                   locationProvider.longitude!,
                                 );
 
-                                return Container(
-                                  margin: const EdgeInsets.only(right: 12),
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                        color: Colors.red.shade300),
-                                    borderRadius: BorderRadius.circular(8),
+                                return InkWell(
+                                  onTap: () => _openResponderProfile(
+                                    context,
+                                    responder,
+                                    locationProvider.latitude!,
+                                    locationProvider.longitude!,
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      SizedBox(
-                                        width: 120,
-                                        child: Text(
-                                          responder.name,
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Container(
+                                    width: 170,
+                                    margin: const EdgeInsets.only(right: 12),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Colors.red.shade300,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12),
+                                      color: Colors.white,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        SizedBox(
+                                          width: 148,
+                                          child: Text(
+                                            responder.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleSmall,
+                                          ),
+                                        ),
+                                        Text(
+                                          responder.skillsArea,
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: Theme.of(context)
                                               .textTheme
-                                              .labelLarge,
+                                              .bodySmall
+                                              ?.copyWith(
+                                            color: Colors.red.shade600,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
-                                      ),
-                                      Text(
-                                        responder.skillsArea,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                          color: Colors.red.shade600,
-                                          fontWeight: FontWeight.bold,
+                                        Text(
+                                          responder.responderType,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelSmall,
                                         ),
-                                      ),
-                                      Text(
-                                        responder.responderType,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall,
-                                      ),
-                                      Text(
-                                        '${distance.toStringAsFixed(1)} km away',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall,
-                                      ),
-                                    ],
+                                        Text(
+                                          '${distance.toStringAsFixed(1)} km away',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
+                                        ),
+                                        Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: TextButton.icon(
+                                            onPressed: () => _openResponderProfile(
+                                              context,
+                                              responder,
+                                              locationProvider.latitude!,
+                                              locationProvider.longitude!,
+                                            ),
+                                            icon: const Icon(Icons.person, size: 16),
+                                            label: const Text('View profile'),
+                                            style: TextButton.styleFrom(
+                                              padding: EdgeInsets.zero,
+                                              minimumSize: const Size(0, 0),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize.shrinkWrap,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 );
                               },

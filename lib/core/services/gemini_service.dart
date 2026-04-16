@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:google_generative_ai/google_generative_ai.dart';
 
@@ -9,6 +10,8 @@ class CrisisAnalysis {
   final String recommendedSkill;
   final List<String> suggestedActions;
   final bool offlineMode;
+  final double confidence;
+  final bool humanReviewRecommended;
 
   const CrisisAnalysis({
     required this.category,
@@ -17,6 +20,8 @@ class CrisisAnalysis {
     required this.recommendedSkill,
     required this.suggestedActions,
     required this.offlineMode,
+    this.confidence = 0.65,
+    this.humanReviewRecommended = false,
   });
 }
 
@@ -24,42 +29,98 @@ class GeminiService {
   static const String _fallbackSkill = 'General Support';
   final String _apiKey;
 
+  static const Map<String, String> _emojiKeywords = <String, String>{
+    '🚨': ' emergency alert ',
+    '🆘': ' sos emergency help ',
+    '🔥': ' fire smoke burn ',
+    '💥': ' explosion emergency ',
+    '🧯': ' fire rescue ',
+    '💧': ' water flood ',
+    '🌊': ' flood disaster ',
+    '🏥': ' medical hospital ',
+    '🚑': ' ambulance medical ',
+    '⛑️': ' medical first aid ',
+    '🩺': ' medical doctor ',
+    '🩸': ' bleeding injury ',
+    '👩': ' woman female ',
+    '👮': ' police safety ',
+    '👮‍♂️': ' police safety ',
+    '👮‍♀️': ' police safety ',
+    '🛡️': ' safety protection ',
+    '👧': ' child kid ',
+    '👦': ' child kid ',
+    '👴': ' elderly old person ',
+    '🧓': ' elderly old person ',
+    '⚠️': ' warning emergency ',
+    '☎️': ' call phone help ',
+    '📞': ' call phone help ',
+    '😨': ' panic fear help ',
+    '😭': ' distress crying help ',
+    '💔': ' distress injury help ',
+    '🍞': ' food supply ',
+    '🥤': ' water supply ',
+    '🔍': ' missing rescue ',
+    '🧑‍🚒': ' fire rescue ',
+    '🧑‍⚕️': ' medical help ',
+  };
+
   GeminiService({String? apiKey})
       : _apiKey = apiKey ?? const String.fromEnvironment('GEMINI_API_KEY');
 
   Future<CrisisAnalysis> analyze(
     String userInput, {
     List<String> availableSkills = const <String>[],
+    bool forceOffline = false,
+    Uint8List? imageBytes,
+    String? imageMimeType,
   }) async {
-    if (_apiKey.isEmpty) {
-      return _offlineHeuristic(userInput);
+    final normalizedInput = _normalizeInput(userInput);
+
+    if (forceOffline || _apiKey.isEmpty) {
+      return _offlineHeuristic(normalizedInput);
     }
 
     try {
       final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: _apiKey);
       final prompt = '''
-You classify emergency text for rapid response.
+    You classify emergency text and optional incident image for rapid response.
 Return strict JSON only with keys:
-category, severity, summary, recommendedSkill, suggestedActions
+category, severity, summary, recommendedSkill, suggestedActions, confidence, humanReviewRecommended
 
 Allowed severity values: low, medium, high, critical.
 recommendedSkill should prefer one from: ${availableSkills.join(', ')}
 If no skill matches, use $_fallbackSkill.
 
+    Treat these as HIGH or CRITICAL by default:
+    - Drowning / person in water / unable to breathe in water
+    - Rail-track hazard / train approaching / person stuck near track
+    - Limb trapped in pit, machinery, grate, or debris
+    - Animal swarm attack (bees, hornets, wasps) with breathing risk
+
+    Input may include Tanglish or mixed Indian languages; infer urgency from meaning, not grammar.
+    If image is present, use visual evidence to override weak text and choose safer severity.
+
 Input:
-$userInput
+$normalizedInput
 ''';
 
-      final response = await model.generateContent(<Content>[Content.text(prompt)]);
+      final content = (imageBytes != null && (imageMimeType ?? '').isNotEmpty)
+          ? Content.multi(<Part>[
+              TextPart(prompt),
+              DataPart(imageMimeType!, imageBytes),
+            ])
+          : Content.text(prompt);
+
+      final response = await model.generateContent(<Content>[content]);
       final text = response.text;
       if (text == null || text.trim().isEmpty) {
-        return _offlineHeuristic(userInput);
+        return _offlineHeuristic(normalizedInput);
       }
 
       final cleaned = text.trim().replaceAll('```json', '').replaceAll('```', '');
       final parsed = jsonDecode(cleaned) as Map<String, dynamic>;
 
-      return CrisisAnalysis(
+      final parsedAnalysis = CrisisAnalysis(
         category: (parsed['category'] as String?) ?? 'Unknown',
         severity: (parsed['severity'] as String?) ?? 'medium',
         summary: (parsed['summary'] as String?) ?? userInput,
@@ -69,14 +130,132 @@ $userInput
                 .toList() ??
             const <String>[],
         offlineMode: false,
+        confidence: _parseConfidence(parsed['confidence']),
+        humanReviewRecommended: parsed['humanReviewRecommended'] == true,
+      );
+      return _applySafetyEscalation(
+        normalizedInput,
+        parsedAnalysis,
+        hasImageEvidence: imageBytes != null,
       );
     } catch (_) {
-      return _offlineHeuristic(userInput);
+      return _offlineHeuristic(normalizedInput);
     }
+  }
+
+  String _normalizeInput(String input) {
+    var normalized = input;
+    for (final entry in _emojiKeywords.entries) {
+      normalized = normalized.replaceAll(entry.key, entry.value);
+    }
+
+    normalized = normalized.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return normalized.isEmpty ? input : normalized;
   }
 
   CrisisAnalysis _offlineHeuristic(String input) {
     final text = input.toLowerCase();
+
+    if (_matchesAny(
+      text,
+      <String>[
+        'drown',
+        'drowning',
+        'underwater',
+        'sinking',
+        'can\'t breathe',
+        'cannot breathe',
+        'water rescue',
+        'river',
+        'lake',
+        'sea',
+      ],
+    )) {
+      return const CrisisAnalysis(
+        category: 'Water Rescue Emergency',
+        severity: 'critical',
+        summary: 'Possible drowning or severe water-distress incident detected.',
+        recommendedSkill: 'Search & Rescue',
+        suggestedActions: <String>[
+          'Call emergency services immediately and request water rescue.',
+          'Do not jump in unless trained; use a rope, pole, or floating object.',
+        ],
+        offlineMode: true,
+      );
+    }
+
+    if (_matchesAny(
+      text,
+      <String>[
+        'rail track',
+        'railway',
+        'train',
+        'track',
+        'stuck on track',
+        'level crossing',
+      ],
+    )) {
+      return const CrisisAnalysis(
+        category: 'Railway Hazard Emergency',
+        severity: 'critical',
+        summary: 'Person appears at immediate risk near an active railway line.',
+        recommendedSkill: 'Search & Rescue',
+        suggestedActions: <String>[
+          'Move everyone away from tracks immediately if safe to do so.',
+          'Alert railway control and emergency responders without delay.',
+        ],
+        offlineMode: true,
+      );
+    }
+
+    if (_matchesAny(
+      text,
+      <String>[
+        'stuck in pit',
+        'leg stuck',
+        'trapped leg',
+        'trapped in pit',
+        'stuck in drain',
+        'stuck in grate',
+      ],
+    )) {
+      return const CrisisAnalysis(
+        category: 'Entrapment Rescue',
+        severity: 'high',
+        summary: 'Possible limb/body entrapment incident detected.',
+        recommendedSkill: 'Search & Rescue',
+        suggestedActions: <String>[
+          'Avoid forceful pulling if fracture risk exists.',
+          'Stabilize the person and request rescue plus medical responders.',
+        ],
+        offlineMode: true,
+      );
+    }
+
+    if (_matchesAny(
+      text,
+      <String>[
+        'bee',
+        'bees',
+        'hornet',
+        'wasp',
+        'swarm',
+        'stings',
+      ],
+    )) {
+      return const CrisisAnalysis(
+        category: 'Animal/Insect Attack',
+        severity: 'high',
+        summary: 'Possible dangerous insect swarm or multiple stings reported.',
+        recommendedSkill: 'Medical Emergency',
+        suggestedActions: <String>[
+          'Move to enclosed shelter and reduce further exposure.',
+          'Watch for breathing difficulty and request urgent medical support.',
+        ],
+        offlineMode: true,
+      );
+    }
+
     if (text.contains('fire') || text.contains('smoke') || text.contains('burn')) {
       return const CrisisAnalysis(
         category: 'Fire Emergency',
@@ -198,5 +377,94 @@ $userInput
       ],
       offlineMode: true,
     );
+  }
+
+  bool _matchesAny(String text, List<String> keywords) {
+    for (final keyword in keywords) {
+      if (text.contains(keyword)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  CrisisAnalysis _applySafetyEscalation(
+    String input,
+    CrisisAnalysis analysis, {
+    required bool hasImageEvidence,
+  }) {
+    final text = input.toLowerCase();
+    final hasCriticalCue = _matchesAny(
+      text,
+      <String>[
+        'drown',
+        'drowning',
+        'underwater',
+        'train',
+        'rail',
+        'track',
+        'stuck in pit',
+        'leg stuck',
+        'trapped',
+      ],
+    );
+    final hasHighCue = _matchesAny(
+      text,
+      <String>['bee', 'bees', 'hornet', 'wasp', 'swarm'],
+    );
+
+    if (!hasCriticalCue && !hasHighCue) {
+      return analysis;
+    }
+
+    // Safety-first hard rule: when image evidence is present with hazard cues,
+    // force critical to avoid under-triage in ambiguous descriptions.
+    final targetSeverity = (hasImageEvidence && (hasCriticalCue || hasHighCue))
+        ? 'critical'
+        : (hasCriticalCue ? 'critical' : 'high');
+    final escalatedSeverity = _maxSeverity(analysis.severity, targetSeverity);
+    final category = analysis.category.toLowerCase() == 'general emergency'
+        ? ((hasCriticalCue || hasImageEvidence)
+            ? 'Rescue Emergency'
+            : 'Medical Safety Emergency')
+        : analysis.category;
+    final reviewRecommended = analysis.humanReviewRecommended || hasImageEvidence;
+
+    return CrisisAnalysis(
+      category: category,
+      severity: escalatedSeverity,
+      summary: analysis.summary,
+      recommendedSkill: analysis.recommendedSkill,
+      suggestedActions: analysis.suggestedActions,
+      offlineMode: analysis.offlineMode,
+      confidence: analysis.confidence,
+      humanReviewRecommended: reviewRecommended,
+    );
+  }
+
+  String _maxSeverity(String a, String b) {
+    const rank = <String, int>{
+      'low': 0,
+      'medium': 1,
+      'high': 2,
+      'critical': 3,
+    };
+    final left = rank[a.toLowerCase()] ?? 1;
+    final right = rank[b.toLowerCase()] ?? 1;
+    return left >= right ? a.toLowerCase() : b.toLowerCase();
+  }
+
+  double _parseConfidence(dynamic value) {
+    if (value is num) {
+      final clamped = value.toDouble().clamp(0.0, 1.0);
+      return clamped;
+    }
+    if (value is String) {
+      final parsed = double.tryParse(value.trim());
+      if (parsed != null) {
+        return parsed.clamp(0.0, 1.0);
+      }
+    }
+    return 0.6;
   }
 }
