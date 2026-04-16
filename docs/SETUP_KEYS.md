@@ -5,8 +5,8 @@
 1. Create a Firebase project.
 2. Add Android and iOS apps with the exact package IDs used in this project.
 3. Download config files:
-   - Android: `android/app/google-services.json`
-   - iOS: `ios/Runner/GoogleService-Info.plist`
+    - Android: `android/app/google-services.json`
+    - iOS: `ios/Runner/GoogleService-Info.plist`
 4. Enable Authentication providers you need (Email/Password, Anonymous, Phone if required).
 5. Enable Firestore and deploy security rules and indexes.
 
@@ -69,6 +69,7 @@ Runtime config via `--dart-define` (or `env/dev.json`):
    - `cloudinary`
 - `CLOUDINARY_CLOUD_NAME` (required when provider is `cloudinary`)
 - `CLOUDINARY_UPLOAD_PRESET` (required when provider is `cloudinary`)
+- `USE_CLOUD_TRANSCRIPTION` (`false` by default for free mode)
 
 Recommended local dev setup in `env/dev.json`:
 
@@ -86,6 +87,7 @@ Notes:
 
 - This keeps Firebase Auth/Firestore unchanged while allowing media uploads to use a free-tier provider.
 - If `cloudinary` is selected but required values are missing, upload will fail with a clear error.
+- In-app SOS composer shows attachment-style media cards with preview/play/remove actions before send.
 
 ## 5) Optional Next Step for Background/Realtime Push
 
