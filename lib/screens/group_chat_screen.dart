@@ -1218,9 +1218,11 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         final chatData = snapshot.data?.data() ?? <String, dynamic>{};
         final status = (chatData['status'] as String?) ?? 'active';
         final participants = _asMapList(chatData['participants']);
-        final hasJoined = participants.any(
-          (entry) => (entry['uid'] as String?) == widget.currentUserId,
-        );
+        final participantUids = _asStringSet(chatData['participantUids']);
+        final hasJoined = participantUids.contains(widget.currentUserId) ||
+            participants.any(
+              (entry) => (entry['uid'] as String?) == widget.currentUserId,
+            );
 
         final canDeleteForVictim =
             widget.currentUserRole == 'victim' && hasJoined;
@@ -1266,7 +1268,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             return AlertDialog(
               title: const Text('Delete chat?'),
               content: const Text(
-                'This removes the SOS group chat document for this incident.',
+                'This closes the SOS group chat for this incident.',
               ),
               actions: <Widget>[
                 TextButton(
@@ -1289,7 +1291,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     try {
       await _chatService.cancelChatFromSosId(
         sosId: widget.sosId,
-        deleteDocument: true,
+        deleteDocument: false,
       );
 
       if (!mounted) {
