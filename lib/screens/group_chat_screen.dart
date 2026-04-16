@@ -107,11 +107,13 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       );
 
       if (shouldAskAiFromMention) {
-        await _requestAiReply(
+        final aiSent = await _requestAiReplySafely(
           userPrompt: text,
           askReason: 'mention',
         );
-        _clearPendingMultimodalContext();
+        if (aiSent) {
+          _clearPendingMultimodalContext();
+        }
       }
 
       _controller.clear();
@@ -139,12 +141,14 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     });
 
     try {
-      await _requestAiReply(
+      final aiSent = await _requestAiReplySafely(
         userPrompt: effectivePrompt,
         askReason: 'ask_button',
       );
-      _clearPendingMultimodalContext();
-      _controller.clear();
+      if (aiSent) {
+        _clearPendingMultimodalContext();
+        _controller.clear();
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -170,6 +174,25 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     );
   }
 
+  Future<bool> _requestAiReplySafely({
+    required String userPrompt,
+    required String askReason,
+  }) async {
+    try {
+      await _requestAiReply(userPrompt: userPrompt, askReason: askReason);
+      return true;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('AI assistant is temporarily unavailable. Please try again.'),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
   void _clearPendingMultimodalContext() {
     _pendingImageDescription = null;
     _pendingVoiceTranscript = null;
@@ -191,6 +214,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           sosId: widget.sosId,
         );
         _autoAiAttempted = true;
+      } catch (_) {
+        // Keep chat stable even if background AI assist fails.
       } finally {
         _autoAiInFlight = false;
       }
