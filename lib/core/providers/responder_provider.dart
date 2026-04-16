@@ -17,6 +17,24 @@ class ResponderProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
+  ResponderModel? responderForUserId(String userId) {
+    for (final responder in _responders) {
+      if (responder.userId == userId) {
+        return responder;
+      }
+    }
+    return null;
+  }
+
+  ResponderModel? responderById(String responderId) {
+    for (final responder in _responders) {
+      if (responder.id == responderId) {
+        return responder;
+      }
+    }
+    return null;
+  }
+
   /// Fetch all responders (from Firestore in real implementation)
   Future<void> fetchResponders() async {
     try {
