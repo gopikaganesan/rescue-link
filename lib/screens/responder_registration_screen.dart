@@ -4,7 +4,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
 import '../core/models/responder_model.dart';
 import '../core/providers/auth_provider.dart';
 import '../core/providers/location_provider.dart';
@@ -211,7 +210,7 @@ class _ResponderRegistrationScreenState
         _showMessage('Location is required to register as responder.');
         return;
       }
-
+    
       final responder = ResponderModel(
         id: currentUser.id,
         userId: currentUser.id,

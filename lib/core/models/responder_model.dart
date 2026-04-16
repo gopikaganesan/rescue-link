@@ -10,6 +10,10 @@ class ResponderModel {
   final String skillsArea; // e.g., "Medical", "Fire", "Search & Rescue"
   final String responderType;
   final String verificationLevel;
+  final bool verifiedResponder;
+  final int rescueCount;
+  final double averageRating;
+  final int ratingCount;
   final double latitude;
   final double longitude;
   final bool isAvailable;
@@ -25,6 +29,10 @@ class ResponderModel {
     required this.skillsArea,
     this.responderType = 'Volunteer',
     this.verificationLevel = 'Self-declared',
+    this.verifiedResponder = false,
+    this.rescueCount = 0,
+    this.averageRating = 0,
+    this.ratingCount = 0,
     required this.latitude,
     required this.longitude,
     this.isAvailable = true,
@@ -60,6 +68,10 @@ class ResponderModel {
       'skillsArea': skillsArea,
       'responderType': responderType,
       'verificationLevel': verificationLevel,
+      'verifiedResponder': verifiedResponder,
+      'rescueCount': rescueCount,
+      'averageRating': averageRating,
+      'ratingCount': ratingCount,
       'latitude': latitude,
       'longitude': longitude,
       'isAvailable': isAvailable,
@@ -87,6 +99,10 @@ class ResponderModel {
       responderType: (map['responderType'] as String?) ?? 'Volunteer',
       verificationLevel:
           (map['verificationLevel'] as String?) ?? 'Self-declared',
+        verifiedResponder: (map['verifiedResponder'] as bool?) ?? false,
+        rescueCount: (map['rescueCount'] as num?)?.toInt() ?? 0,
+        averageRating: (map['averageRating'] as num?)?.toDouble() ?? 0,
+        ratingCount: (map['ratingCount'] as num?)?.toInt() ?? 0,
       latitude: (map['latitude'] as num?)?.toDouble() ?? 0.0,
       longitude: (map['longitude'] as num?)?.toDouble() ?? 0.0,
       isAvailable: (map['isAvailable'] as bool?) ?? true,
@@ -104,6 +120,10 @@ class ResponderModel {
     String? skillsArea,
     String? responderType,
     String? verificationLevel,
+    bool? verifiedResponder,
+    int? rescueCount,
+    double? averageRating,
+    int? ratingCount,
     double? latitude,
     double? longitude,
     bool? isAvailable,
@@ -119,6 +139,10 @@ class ResponderModel {
       skillsArea: skillsArea ?? this.skillsArea,
       responderType: responderType ?? this.responderType,
       verificationLevel: verificationLevel ?? this.verificationLevel,
+      verifiedResponder: verifiedResponder ?? this.verifiedResponder,
+      rescueCount: rescueCount ?? this.rescueCount,
+      averageRating: averageRating ?? this.averageRating,
+      ratingCount: ratingCount ?? this.ratingCount,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       isAvailable: isAvailable ?? this.isAvailable,
