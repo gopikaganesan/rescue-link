@@ -24,6 +24,9 @@ import '../core/services/responder_matching_service.dart';
 import '../core/services/transcription_service.dart';
 import '../core/models/responder_model.dart';
 import 'auth_screen.dart';
+import 'group_chat_screen.dart';
+import 'victim_chat_list_screen.dart';
+import 'responder_chat_list_screen.dart';
 import 'responder_registration_screen.dart';
 import 'responder_requests_screen.dart';
 import 'map_screen.dart';
@@ -610,6 +613,21 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.map),
             label: const Text('View Map'),
           ),
+          if (_currentSosRequestId != null) ...[
+            const SizedBox(width: 8),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _openCurrentSosChat();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green.shade700,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text('Open Chat'),
+            ),
+          ],
           if (responderProvider.nearbyResponders.isEmpty) ...[
             const SizedBox(width: 8),
             // Call Emergency button
@@ -677,6 +695,53 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => const ResponderRequestsScreen(),
+      ),
+    );
+  }
+
+  void _openChats() {
+    final auth = context.read<AuthProvider>();
+    final user = auth.currentUser;
+    if (user == null) {
+      _showSnackBar('Please sign in to view chats.');
+      return;
+    }
+
+    if (user.isResponder) {
+      ResponderChatListScreen.open(
+        context,
+        currentUserId: user.id,
+        currentUserName: user.displayName,
+      );
+      return;
+    }
+
+    VictimChatListScreen.open(
+      context,
+      currentUserId: user.id,
+      currentUserName: user.displayName,
+    );
+  }
+
+  void _openCurrentSosChat() {
+    final authProvider = context.read<AuthProvider>();
+    final user = authProvider.currentUser;
+    final sosId = _currentSosRequestId;
+
+    if (user == null || sosId == null) {
+      _showSnackBar('Chat is not ready yet.');
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GroupChatScreen(
+          sosId: sosId,
+          currentUserId: user.id,
+          currentUserName: user.displayName,
+          currentUserRole: 'victim',
+          enableResponderJoinGate: false,
+        ),
       ),
     );
   }
@@ -1832,9 +1897,9 @@ void _showCommsSimulationSheet() {
 	 // Build icon list dynamically
         final List<IconData> iconList = [
           Icons.language,
+          Icons.chat_bubble_outline,
           if (authProvider.currentUser?.isResponder == true)
             Icons.support_agent,
-          Icons.cell_tower,
           Icons.map,
           Icons.account_circle,
         ];
@@ -1842,9 +1907,9 @@ void _showCommsSimulationSheet() {
         // Map actions
         final List<VoidCallback> actions = [
           _showLanguagePicker,
+          _openChats,
           if (authProvider.currentUser?.isResponder == true)
             _openResponderRequests,
-          _showCommsSimulationSheet,
           _openMap,
           _showAccountSheet,
         ];
@@ -1861,6 +1926,11 @@ void _showCommsSimulationSheet() {
             icon: const Icon(Icons.accessibility_new),
             onPressed: _showAccessibilitySheet,
             tooltip: 'Accessibility',
+          ),
+          IconButton(
+            icon: const Icon(Icons.wifi_tethering),
+            onPressed: _showCommsSimulationSheet,
+            tooltip: 'Comms Simulation',
           ),
         ],
       ),

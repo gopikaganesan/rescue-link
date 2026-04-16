@@ -14,6 +14,11 @@ Built with **Flutter + Firebase + Gemini** for GDG on Campus CIT Solution Challe
 - Gemini AI emergency classification & resource allocation
 - Multimodal SOS evidence (typed context + voice transcript + voice clip + camera photo)
 - Attachment-style SOS composer with in-app photo preview and voice clip playback
+- Group chat for victim and responders with role-aware actions
+- Group chat attachments: gallery image, camera image, and voice clips
+- In-chat Ask AI assistance with conversation-context prompts
+- In-chat voice attachment inline playback (play/pause + progress)
+- Victim chat delete and responder leave-chat controls
 - Helper/Responder registration (anyone can register skills/capacity)
 - Offline Mesh + Satellite Mode (simulated fallback)
 - Nearby map of resources
