@@ -674,31 +674,33 @@ class ChatService {
     final chat = chatRef(sosId);
     final messageDoc = messagesRef(sosId).doc();
 
-    await _firestore.runTransaction((transaction) async {
-      final chatSnapshot = await transaction.get(chat);
-      final chatData = chatSnapshot.data() ?? <String, dynamic>{};
-      final status = (chatData['status'] as String?) ?? 'active';
-      if (status == 'cancelled') {
-        return;
-      }
+    await _withFirestoreRetry(() async {
+      await _firestore.runTransaction((transaction) async {
+        final chatSnapshot = await transaction.get(chat);
+        final chatData = chatSnapshot.data() ?? <String, dynamic>{};
+        final status = (chatData['status'] as String?) ?? 'active';
+        if (status == 'cancelled') {
+          return;
+        }
 
-      final participantUids = _extractParticipantUids(chatData);
-      if (!participantUids.contains(_aiUid)) {
-        return;
-      }
+        final participantUids = _extractParticipantUids(chatData);
+        if (!participantUids.contains(_aiUid)) {
+          return;
+        }
 
-      transaction.set(messageDoc, <String, dynamic>{
-        'text': safeText,
-        'senderUid': _aiUid,
-        'senderRole': 'responder',
-        'senderName': _aiDisplayName,
-        'createdAt': FieldValue.serverTimestamp(),
-        'type': 'text',
-        'isAi': true,
-        'aiMeta': <String, dynamic>{
-          'trigger': trigger,
-          'requesterUid': requesterUid,
-        },
+        transaction.set(messageDoc, <String, dynamic>{
+          'text': safeText,
+          'senderUid': _aiUid,
+          'senderRole': 'responder',
+          'senderName': _aiDisplayName,
+          'createdAt': FieldValue.serverTimestamp(),
+          'type': 'text',
+          'isAi': true,
+          'aiMeta': <String, dynamic>{
+            'trigger': trigger,
+            'requesterUid': requesterUid,
+          },
+        });
       });
     });
   }
