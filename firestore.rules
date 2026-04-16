@@ -50,5 +50,99 @@ service cloud.firestore {
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow delete: if false;
     }
+
+    match /chats/{chatId} {
+      allow read: if isSignedIn();
+
+      // Initial chat create for an SOS thread.
+      allow create: if isSignedIn()
+        && request.resource.data.sosId == chatId
+        && request.resource.data.status in ['active', 'cancelled']
+        && request.resource.data.keys().hasOnly([
+          'sosId',
+          'createdAt',
+          'status',
+          'sosOverview',
+          'participants',
+          'participantUids',
+          'onlineCount',
+          'responderPresence'
+        ])
+        && request.resource.data.sosOverview is map
+        && request.resource.data.sosOverview.message is string
+        && request.resource.data.sosOverview.media is list
+        && request.resource.data.participants is list
+        && request.resource.data.participantUids is list
+        && (!('onlineCount' in request.resource.data)
+          || (request.resource.data.onlineCount is int
+            && request.resource.data.onlineCount >= 0))
+        && exists(/databases/$(database)/documents/emergency_requests/$(chatId))
+        && request.resource.data.participantUids.hasAny([
+          get(/databases/$(database)/documents/emergency_requests/$(chatId)).data.requesterUserId
+        ]);
+
+      // Chat updates only by existing participants, or by users joining themselves.
+      allow update: if isSignedIn()
+        && request.resource.data.sosId == resource.data.sosId
+        && request.resource.data.status in ['active', 'cancelled']
+        && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'participants',
+              'participantUids'
+            ])
+            && request.resource.data.participantUids.hasAny([request.auth.uid])
+          )
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'participants',
+              'participantUids',
+              'responderPresence',
+              'onlineCount'
+            ])
+            && request.resource.data.onlineCount is int
+            && request.resource.data.onlineCount >= 0
+            && resource.data.participantUids.hasAny([request.auth.uid])
+          )
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status',
+              'cancelledAt'
+            ])
+            && resource.data.participantUids.hasAny([request.auth.uid])
+          )
+        );
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+
+        // Text messages only; sender identity must match auth user.
+        allow create: if isSignedIn()
+          && request.resource.data.keys().hasOnly([
+            'text',
+            'senderUid',
+            'senderRole',
+            'senderName',
+            'createdAt',
+            'type'
+          ])
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.type == 'text'
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.senderName is string
+          && request.resource.data.senderName.size() > 0
+          && request.resource.data.senderName.size() <= 80
+          && request.resource.data.senderRole in ['victim', 'responder']
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.status == 'active'
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.participantUids.hasAny([request.auth.uid]);
+
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
   }
 }
