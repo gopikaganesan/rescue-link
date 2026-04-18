@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -8,6 +10,8 @@ class NotificationService {
   static final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  static Future<void> Function(String sosId)? _onChatNotificationTap;
+  static String? _pendingChatSosId;
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'rescue_link_alerts',
@@ -20,7 +24,12 @@ class NotificationService {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const settings = InitializationSettings(android: androidInit);
 
-    await _plugin.initialize(settings);
+    await _plugin.initialize(
+      settings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        _handleLocalNotificationTap(response.payload);
+      },
+    );
 
     await _plugin
         .resolvePlatformSpecificImplementation<
@@ -42,12 +51,91 @@ class NotificationService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       final title = message.notification?.title ?? 'RescueLink Alert';
       final body = message.notification?.body ?? 'New emergency update';
-      await showSosAlert(title: title, body: body);
+      await showSosAlert(
+        title: title,
+        body: body,
+        payload: _payloadFromRemoteMessage(message),
+      );
     });
 
-    FirebaseMessaging.onMessageOpenedApp.listen((_) {
-      // Navigation can be added later via app-level route handling.
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      _dispatchChatNavigationForRemoteMessage(message);
     });
+
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      _dispatchChatNavigationForRemoteMessage(initialMessage);
+    }
+  }
+
+  static void setOnChatNotificationTap(
+    Future<void> Function(String sosId) handler,
+  ) {
+    _onChatNotificationTap = handler;
+    _flushPendingChatNavigation();
+  }
+
+  static void _dispatchChatNavigationForRemoteMessage(RemoteMessage message) {
+    final sosId = _extractChatSosId(message.data);
+    if (sosId.isEmpty) {
+      return;
+    }
+    _queueOrHandleChatNavigation(sosId);
+  }
+
+  static String? _payloadFromRemoteMessage(RemoteMessage message) {
+    final sosId = _extractChatSosId(message.data);
+    if (sosId.isEmpty) {
+      return null;
+    }
+    return jsonEncode(<String, String>{'chatSosId': sosId});
+  }
+
+  static void _handleLocalNotificationTap(String? payload) {
+    if (payload == null || payload.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is! Map) {
+        return;
+      }
+      final sosId = _extractChatSosId(decoded);
+      if (sosId.isEmpty) {
+        return;
+      }
+      _queueOrHandleChatNavigation(sosId);
+    } catch (_) {
+      // Ignore malformed payloads to keep notifications resilient.
+    }
+  }
+
+  static String _extractChatSosId(Map<dynamic, dynamic> data) {
+    final fromChat = (data['chatSosId'] as String?)?.trim();
+    if (fromChat != null && fromChat.isNotEmpty) {
+      return fromChat;
+    }
+    return '';
+  }
+
+  static void _queueOrHandleChatNavigation(String sosId) {
+    final handler = _onChatNotificationTap;
+    if (handler == null) {
+      _pendingChatSosId = sosId;
+      return;
+    }
+    handler(sosId);
+  }
+
+  static void _flushPendingChatNavigation() {
+    final pending = _pendingChatSosId;
+    final handler = _onChatNotificationTap;
+    if (pending == null || handler == null) {
+      return;
+    }
+    _pendingChatSosId = null;
+    handler(pending);
   }
 
   static String _normalizeTopic(String value) {
@@ -139,6 +227,7 @@ class NotificationService {
   static Future<void> showSosAlert({
     required String title,
     required String body,
+    String? payload,
   }) async {
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
@@ -155,6 +244,7 @@ class NotificationService {
       title,
       body,
       details,
+      payload: payload,
     );
   }
 }

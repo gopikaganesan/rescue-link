@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../core/providers/app_settings_provider.dart';
 import '../services/chat_service.dart';
+import '../widgets/translated_text.dart';
 import 'group_chat_screen.dart';
 
 class ResponderChatListScreen extends StatefulWidget {
@@ -34,12 +37,14 @@ class ResponderChatListScreen extends StatefulWidget {
   }
 
   @override
-  State<ResponderChatListScreen> createState() =>
-      _ResponderChatListScreenState();
+  State<ResponderChatListScreen> createState() => _ResponderChatListScreenState();
 }
 
 class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
   late bool _showAllActiveChats;
+  final ChatService _chatService = ChatService();
+  final Set<String> _autoPruneInProgress = <String>{};
+  final Set<String> _leavingSosIds = <String>{};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -57,13 +62,14 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.read<AppSettingsProvider>();
     final chatService = ChatService();
     final stream = _showAllActiveChats
         ? chatService.watchActiveChats()
         : chatService.watchResponderChats(widget.currentUserId);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Responder Chats')),
+      appBar: AppBar(title: Text(settings.t('title_responder_alerts'))),
       body: Column(
         children: <Widget>[
           Padding(
@@ -72,7 +78,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
               spacing: 8,
               children: <Widget>[
                 ChoiceChip(
-                  label: const Text('All Active'),
+                  label: Text(settings.t('filter_all_active')),
                   selected: _showAllActiveChats,
                   onSelected: (selected) {
                     if (!selected) {
@@ -84,7 +90,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                   },
                 ),
                 ChoiceChip(
-                  label: const Text('Joined By Me'),
+                  label: Text(settings.t('filter_joined_by_me')),
                   selected: !_showAllActiveChats,
                   onSelected: (selected) {
                     if (!selected) {
@@ -108,7 +114,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                 });
               },
               decoration: InputDecoration(
-                hintText: 'Search by SOS ID or message',
+                hintText: settings.t('hint_search_case'),
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchQuery.isEmpty
                     ? null
@@ -131,7 +137,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
               stream: stream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  return const Center(child: Text('Failed to load chats'));
+                  return Center(child: Text(settings.t('error_failed_load_chats')));
                 }
 
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -145,10 +151,23 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                   return Center(
                     child: Text(
                       _showAllActiveChats
-                          ? 'No active chats right now.'
-                          : 'You have not joined any chats yet.',
+                          ? settings.t('status_no_active_chats')
+                          : settings.t('status_no_joined_chats'),
                     ),
                   );
+                }
+
+                final cancelledDocsForUser = docs.where((doc) {
+                  final data = doc.data();
+                  final status =
+                      ((data['status'] as String?) ?? 'active').toLowerCase();
+                  return status == 'cancelled' &&
+                      _isJoinedByUser(data, widget.currentUserId);
+                }).toList();
+                if (cancelledDocsForUser.isNotEmpty) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _autoRemoveCancelledChats(cancelledDocsForUser);
+                  });
                 }
 
                 final sortedDocs = docs.toList()
@@ -176,11 +195,17 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                   });
 
                 final filteredDocs = sortedDocs.where((doc) {
+                  final data = doc.data();
+                  final status =
+                      ((data['status'] as String?) ?? 'active').toLowerCase();
+                  if (status == 'cancelled') {
+                    return false;
+                  }
+
                   if (_searchQuery.isEmpty) {
                     return true;
                   }
 
-                  final data = doc.data();
                   final sosId = ((data['sosId'] as String?) ?? doc.id).toLowerCase();
                   final overview = _asMap(data['sosOverview']);
                   final message =
@@ -191,14 +216,13 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                 }).toList();
 
                 if (filteredDocs.isEmpty) {
-                  return const Center(
-                    child: Text('No chats match your search.'),
-                  );
+                  return Center(child: Text(settings.t('status_no_matching_chats')));
                 }
 
                 final joinedCount = filteredDocs
                     .where(
-                      (doc) => _isJoinedByUser(doc.data(), widget.currentUserId),
+                      (doc) =>
+                          _isJoinedByUser(doc.data(), widget.currentUserId),
                     )
                     .length;
 
@@ -210,12 +234,15 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            'Showing ${filteredDocs.length} chats • Joined $joinedCount',
+                            settings
+                                .t('responder_chat_showing_joined')
+                                .replaceAll('{total}', '${filteredDocs.length}')
+                                .replaceAll('{joined}', '$joinedCount'),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Tap a chat to open conversation. Join happens inside chat if needed.',
+                            settings.t('responder_chat_tap_hint'),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -224,16 +251,23 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                     Expanded(
                       child: ListView.separated(
                         itemCount: filteredDocs.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (_, __) => Divider(
+                          height: 1,
+                          color: Colors.grey.shade300,
+                        ),
                         itemBuilder: (context, index) {
                           final doc = filteredDocs[index];
                           final data = doc.data();
 
                           final sosId = (data['sosId'] as String?) ?? doc.id;
                           final overview = _asMap(data['sosOverview']);
+                          final chatTitle = _humanFriendlyChatTitle(
+                            data: data,
+                            sosId: sosId,
+                          );
                           final message = _safeText(
                             overview['message'] as String?,
-                            fallback: 'No SOS message available',
+                            fallback: settings.t('status_no_sos_message_available'),
                             maxLen: 90,
                           );
                           final participantCount = _participantCount(data);
@@ -245,53 +279,110 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                           );
 
                           return ListTile(
-                            title: Text('SOS: $sosId'),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            title: Row(
                               children: <Widget>[
-                                const SizedBox(height: 4),
-                                Text(
-                                  message,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Participants: $participantCount • Online responders: $onlineCount • Status: $status • Joined: ${isJoinedByMe ? 'Yes' : 'No'}',
-                                ),
-                                const SizedBox(height: 6),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 3,
+                                Expanded(
+                                  child: Text(
+                                    chatTitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
                                     ),
-                                    decoration: BoxDecoration(
-                                      color: status == 'active'
-                                          ? Colors.green.shade50
-                                          : Colors.red.shade50,
-                                      borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(
-                                        color: status == 'active'
-                                            ? Colors.green.shade300
-                                            : Colors.red.shade300,
-                                      ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
+                                    Icon(
+                                      Icons.circle,
+                                      size: 10,
+                                      color: Colors.green.shade700,
                                     ),
-                                    child: Text(
-                                      status.toUpperCase(),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '$onlineCount',
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall
                                           ?.copyWith(
-                                            color: status == 'active'
-                                                ? Colors.green.shade800
-                                                : Colors.red.shade800,
-                                            fontWeight: FontWeight.w700,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.green.shade700,
                                           ),
                                     ),
-                                  ),
+                                    const SizedBox(width: 10),
+                                    Icon(
+                                      Icons.group,
+                                      size: 10,
+                                      color: Colors.redAccent.shade700,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '$participantCount',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.redAccent.shade700,
+                                          ),
+                                    ),
+                                  ],
                                 ),
+                              ],
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                const SizedBox(height: 4),
+                                TranslatedText(
+                                  message,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: <Widget>[
+                                    Expanded(
+                                      child: Text(
+                                        '${context.read<AppSettingsProvider>().t('label_case_id')}: $sosId',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style:
+                                            Theme.of(context).textTheme.bodySmall,
+                                      ),
+                                    ),
+                                    Text(
+                                      _timeText(_createdAt(data)),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall,
+                                    ),
+                                  ],
+                                ),
+                                if (status != 'active') ...<Widget>[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    status == 'cancelled'
+                                        ? context.read<AppSettingsProvider>().t('status_cancelled')
+                                        : status.toUpperCase(),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          color: status == 'active'
+                                              ? Colors.green.shade800
+                                              : Colors.red.shade800,
+                                        ),
+                                  ),
+                                ],
                               ],
                             ),
                             trailing: Row(
@@ -301,10 +392,9 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                                   Icon(
                                     Icons.check_circle,
                                     size: 18,
-                                    color: Theme.of(context).colorScheme.primary,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
                                   ),
-                                const SizedBox(width: 6),
-                                const Icon(Icons.chevron_right),
                               ],
                             ),
                             onTap: () {
@@ -332,6 +422,97 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _autoRemoveCancelledChats(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    for (final doc in docs) {
+      final data = doc.data();
+      final sosId = ((data['sosId'] as String?) ?? doc.id).trim();
+      if (sosId.isEmpty || _autoPruneInProgress.contains(sosId)) {
+        continue;
+      }
+
+      _autoPruneInProgress.add(sosId);
+      try {
+        await _chatService.removeResponderFromChatList(
+          sosId: sosId,
+          responderUid: widget.currentUserId,
+        );
+      } catch (_) {
+        // Ignore transient errors; next snapshot can retry.
+      } finally {
+        _autoPruneInProgress.remove(sosId);
+      }
+    }
+  }
+
+  Future<void> _confirmLeaveActiveConversation({
+    required String sosId,
+    required bool isJoinedByMe,
+  }) async {
+    if (!isJoinedByMe || _leavingSosIds.contains(sosId)) {
+      return;
+    }
+
+    final settings = context.read<AppSettingsProvider>();
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(settings.t('dialog_leave_conversation_title')),
+            content: Text(
+              settings.t('dialog_leave_conversation_body'),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(settings.t('button_cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(settings.t('button_leave')),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _leavingSosIds.add(sosId);
+    });
+
+    try {
+      await _chatService.removeResponderFromChatList(
+        sosId: sosId,
+        responderUid: widget.currentUserId,
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(settings.t('snackbar_conversation_removed'))),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to leave right now. Please retry.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _leavingSosIds.remove(sosId);
+        });
+      }
+    }
   }
 
   static Map<String, dynamic> _asMap(dynamic raw) {
@@ -403,5 +584,70 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
       return base;
     }
     return '${base.substring(0, maxLen)}...';
+  }
+
+  static String _humanFriendlyChatTitle({
+    required Map<String, dynamic> data,
+    required String sosId,
+  }) {
+    final overview = _asMap(data['sosOverview']);
+
+    final customTitle = (overview['title'] as String?)?.trim();
+    if (customTitle != null && customTitle.isNotEmpty) {
+      return customTitle;
+    }
+
+    final crisisType = ((overview['crisisType'] as String?) ??
+            (data['crisisType'] as String?) ??
+            '')
+        .trim();
+
+    final participants = data['participants'];
+    if (participants is List) {
+      for (final entry in participants.whereType<Map>()) {
+        final role = ((entry['role'] as String?) ?? '').toLowerCase();
+        final displayName = (entry['displayName'] as String?)?.trim() ?? '';
+        if (role == 'victim' && displayName.isNotEmpty) {
+          if (displayName.toLowerCase() == 'victim') {
+            break;
+          }
+          return crisisType.isNotEmpty
+              ? '${_toTitleCase(crisisType)}: $displayName'
+              : 'Emergency: $displayName';
+        }
+      }
+    }
+
+    if (crisisType.isNotEmpty) {
+      return '${_toTitleCase(crisisType)} emergency';
+    }
+
+    return 'Emergency chat ${sosId.length >= 6 ? sosId.substring(0, 6) : sosId}';
+  }
+
+  static String _toTitleCase(String input) {
+    final words = input
+        .split(RegExp(r'\s+'))
+        .where((word) => word.trim().isNotEmpty)
+        .toList();
+    if (words.isEmpty) {
+      return input;
+    }
+
+    return words
+        .map(
+          (word) =>
+              '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}',
+        )
+        .join(' ');
+  }
+
+  static String _timeText(DateTime value) {
+    final local = value.toLocal();
+    final time =
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    final date =
+        '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}';
+    return '$time • $date';
   }
 }

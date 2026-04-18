@@ -64,12 +64,69 @@ Emergency photo/audio uploads now use a provider abstraction in:
 
 Runtime config via `--dart-define` (or `env/dev.json`):
 
-- `MEDIA_UPLOAD_PROVIDER`:
-   - `firebase` (default)
-   - `cloudinary`
+- `MEDIA_UPLOAD_PROVIDER`: `firebase` (default) or `cloudinary`
 - `CLOUDINARY_CLOUD_NAME` (required when provider is `cloudinary`)
 - `CLOUDINARY_UPLOAD_PRESET` (required when provider is `cloudinary`)
 - `USE_CLOUD_TRANSCRIPTION` (`false` by default for free mode)
+- `MEDIA_IMAGE_MAX_DIMENSION` (`1280` by default)
+- `MEDIA_IMAGE_JPEG_QUALITY` (`82` by default)
+
+Recommended architecture for this app:
+
+- Keep Firebase Auth + Firestore as your source of truth.
+- Use Cloudinary only for file hosting/CDN (image/audio URLs).
+- Store returned Cloudinary `secure_url` inside Firestore message docs.
+
+Why this is better than MongoDB for your current app:
+
+- Your app already depends on Firestore data models and rules.
+- Migrating chat + presence + auth-linked access checks to MongoDB adds major backend work.
+- Cloudinary solves only the media-hosting piece quickly, without replacing your current database.
+
+### Cloudinary Free Setup (from your side)
+
+1. Create account and product environment:
+   - Open Cloudinary Console and create a free account.
+   - Use the default product environment or create one dedicated for this app.
+
+1. Create unsigned upload preset (required for direct client upload):
+   - Go to Settings -> Upload.
+   - Scroll to Upload presets -> Add upload preset.
+   - Set Signing Mode to Unsigned.
+   - Suggested restrictions:
+      - Folder: `rescue_link`
+      - Allowed formats: `jpg,jpeg,png,webp,wav,m4a,mp3`
+      - Max file size: set a strict value that fits your use-case
+      - Resource type: Auto
+   - Save and copy the preset name.
+
+1. Collect values you need in Flutter:
+   - `cloud_name` from your Cloudinary dashboard.
+   - `upload_preset` from step 2.
+
+1. Add values to `env/dev.json`:
+
+```json
+{
+   "GEMINI_API_KEY": "YOUR_KEY",
+   "USE_CLOUD_TRANSCRIPTION": "false",
+   "MEDIA_UPLOAD_PROVIDER": "cloudinary",
+   "CLOUDINARY_CLOUD_NAME": "your-cloud-name",
+   "CLOUDINARY_UPLOAD_PRESET": "your-unsigned-preset",
+   "MEDIA_IMAGE_MAX_DIMENSION": "1280",
+   "MEDIA_IMAGE_JPEG_QUALITY": "82"
+}
+```
+
+1. Run app with env file:
+
+- `flutter run -d chrome --dart-define-from-file=env/dev.json`
+
+Security note:
+
+- Do not put `api_secret` in Flutter app code.
+- Unsigned presets must stay restricted (format/size/folder) because they can be abused if too open.
+- If you later need stronger control, move uploads behind a signed backend endpoint.
 
 Recommended local dev setup in `env/dev.json`:
 
@@ -79,15 +136,19 @@ Recommended local dev setup in `env/dev.json`:
    "USE_CLOUD_TRANSCRIPTION": "false",
    "MEDIA_UPLOAD_PROVIDER": "cloudinary",
    "CLOUDINARY_CLOUD_NAME": "your-cloud",
-   "CLOUDINARY_UPLOAD_PRESET": "your_unsigned_preset"
+   "CLOUDINARY_UPLOAD_PRESET": "your_unsigned_preset",
+   "MEDIA_IMAGE_MAX_DIMENSION": "1280",
+   "MEDIA_IMAGE_JPEG_QUALITY": "82"
 }
 ```
 
 Notes:
 
 - This keeps Firebase Auth/Firestore unchanged while allowing media uploads to use a free-tier provider.
-- If `cloudinary` is selected but required values are missing, upload will fail with a clear error.
+- If `cloudinary` is selected but required values are missing, app now safely falls back to Firebase Storage upload.
 - In-app SOS composer shows attachment-style media cards with preview/play/remove actions before send.
+- Image uploads are automatically resized on-device before upload to keep media smaller and faster to deliver.
+- Current optimization target: max 1280px on the longest edge, encoded as JPEG quality 82.
 
 ## 5) Optional Next Step for Background/Realtime Push
 

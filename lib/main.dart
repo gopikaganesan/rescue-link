@@ -12,6 +12,7 @@ import 'core/providers/location_provider.dart';
 import 'core/providers/responder_provider.dart';
 import 'core/services/notification_service.dart';
 import 'screens/auth_screen.dart';
+import 'screens/group_chat_screen.dart';
 import 'screens/home_screen.dart';
 
 @pragma('vm:entry-point')
@@ -31,8 +32,55 @@ void main() async {
   runApp(const RescueLinkApp());
 }
 
-class RescueLinkApp extends StatelessWidget {
+class RescueLinkApp extends StatefulWidget {
   const RescueLinkApp({super.key});
+
+  @override
+  State<RescueLinkApp> createState() => _RescueLinkAppState();
+}
+
+class _RescueLinkAppState extends State<RescueLinkApp> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService.setOnChatNotificationTap(_openChatFromNotification);
+  }
+
+  Future<void> _openChatFromNotification(String sosId) async {
+    final safeSosId = sosId.trim();
+    if (safeSosId.isEmpty) {
+      return;
+    }
+
+    final context = _navigatorKey.currentContext;
+    if (context == null) {
+      return;
+    }
+
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final user = auth.currentUser;
+    if (user == null) {
+      return;
+    }
+
+    final userName = user.displayName.trim().isNotEmpty
+        ? user.displayName
+        : 'RescueLink User';
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => GroupChatScreen(
+          sosId: safeSosId,
+          currentUserId: user.id,
+          currentUserName: userName,
+          currentUserRole: user.isResponder ? 'responder' : 'victim',
+          enableResponderJoinGate: user.isResponder,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +99,7 @@ class RescueLinkApp extends StatelessWidget {
           return MaterialApp(
             title: 'RescueLink',
             debugShowCheckedModeBanner: false,
+            navigatorKey: _navigatorKey,
             theme: ThemeData(
               useMaterial3: true,
               colorScheme: settings.highContrastEnabled
