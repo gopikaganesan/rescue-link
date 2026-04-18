@@ -22,7 +22,6 @@ import '../core/services/notification_service.dart';
 import '../core/services/media_upload_service.dart';
 import '../core/services/responder_matching_service.dart';
 import '../core/services/transcription_service.dart';
-import '../core/models/responder_model.dart';
 import 'auth_screen.dart';
 import 'group_chat_screen.dart';
 import 'victim_chat_list_screen.dart';
@@ -30,9 +29,8 @@ import 'responder_chat_list_screen.dart';
 import 'responder_registration_screen.dart';
 import 'responder_requests_screen.dart';
 import 'map_screen.dart';
-import 'responder_profile_screen.dart';
 import '../widgets/sos_button.dart';
-import 'dart:ui';	 
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -53,7 +51,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _voicePreviewPlayer = AudioPlayer();
   final TranscriptionService _transcriptionService = TranscriptionService();
-  final MediaUploadService _mediaUploadService = MediaUploadService.fromEnvironment();
+  final MediaUploadService _mediaUploadService =
+      MediaUploadService.fromEnvironment();
   StreamSubscription<void>? _voicePreviewCompleteSub;
   bool _speechReady = false;
   bool _isTranscribing = false;
@@ -63,9 +62,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _forceCriticalSeverity = false;
   String _transcriptionProvider = 'On-device speech';
   double? _transcriptionConfidence;
-  final bool _cloudTranscriptionEnabled =
-      const String.fromEnvironment('USE_CLOUD_TRANSCRIPTION', defaultValue: 'false') ==
-          'true';
+  final bool _cloudTranscriptionEnabled = const String.fromEnvironment(
+          'USE_CLOUD_TRANSCRIPTION',
+          defaultValue: 'false') ==
+      'true';
   XFile? _selectedImage;
   String? _voiceTranscript;
   String? _voiceAudioPath;
@@ -137,7 +137,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final myResponder = responders.responders.where((r) => r.userId == user.id).toList();
+    final myResponder =
+        responders.responders.where((r) => r.userId == user.id).toList();
     final profile = myResponder.isEmpty ? null : myResponder.first;
 
     await NotificationService.syncDeviceProfile(
@@ -187,8 +188,10 @@ class _HomeScreenState extends State<HomeScreen> {
         continue;
       }
 
-      final radius = ResponderMatchingService.radiusKmForSeverity(request.severity);
-      final distance = responder.distanceToLocation(request.latitude, request.longitude);
+      final radius =
+          ResponderMatchingService.radiusKmForSeverity(request.severity);
+      final distance =
+          responder.distanceToLocation(request.latitude, request.longitude);
       if (distance > radius) {
         continue;
       }
@@ -196,7 +199,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _notifiedRequestIds.add(request.id);
       await NotificationService.showSosAlert(
         title: 'New Nearby SOS (${request.severity.toUpperCase()})',
-        body: '${request.category} • ${request.recommendedSkill} • ${distance.toStringAsFixed(1)} km',
+        body:
+            '${request.category} • ${request.recommendedSkill} • ${distance.toStringAsFixed(1)} km',
       );
     }
   }
@@ -256,6 +260,10 @@ class _HomeScreenState extends State<HomeScreen> {
       final aiMessageParts = List<String>.from(baseMessageParts);
       if (_selectedImage != null) {
         aiMessageParts.add('Photo evidence selected');
+        final fileName = _selectedImage!.name.trim();
+        if (fileName.isNotEmpty) {
+          aiMessageParts.add('Photo filename: $fileName');
+        }
       }
 
       final aiMessage = aiMessageParts.isEmpty
@@ -272,9 +280,11 @@ class _HomeScreenState extends State<HomeScreen> {
           final audioBytes = await XFile(_voiceAudioPath!).readAsBytes();
           final cloudResult = await _transcriptionService.transcribeWithCloud(
             audioBytes: audioBytes,
-            languageCode: _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
+            languageCode: _speechLocaleForLanguage(
+                context.read<AppSettingsProvider>().languageCode),
             alternativeLanguageCodes: _speechAlternatives(
-              _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
+              _speechLocaleForLanguage(
+                  context.read<AppSettingsProvider>().languageCode),
             ),
           );
           if (cloudResult != null && cloudResult.transcript.trim().isNotEmpty) {
@@ -284,7 +294,8 @@ class _HomeScreenState extends State<HomeScreen> {
             _transcriptionConfidence = cloudResult.confidence;
             if (_emergencyContextController.text.trim().isEmpty) {
               _emergencyContextController.text = transcript;
-              _emergencyContextController.selection = TextSelection.fromPosition(
+              _emergencyContextController.selection =
+                  TextSelection.fromPosition(
                 TextPosition(offset: _emergencyContextController.text.length),
               );
             }
@@ -296,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'SOS triggered by ${authProvider.currentUser!.displayName} near '
           '${locationProvider.latitude!.toStringAsFixed(4)}, '
           '${locationProvider.longitude!.toStringAsFixed(4)}. '
-		  '${_emergencyContextController.text.trim().isEmpty ? 'Potential emergency needs urgent support.' : _emergencyContextController.text.trim()}'
+          '${_emergencyContextController.text.trim().isEmpty ? 'Potential emergency needs urgent support.' : _emergencyContextController.text.trim()}'
           'Human report: $aiMessage';
 
       Uint8List? imageBytesForAi;
@@ -324,7 +335,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       String? attachmentUrl;
       try {
-        attachmentUrl = await _uploadAttachmentIfNeeded(authProvider.currentUser!.id);
+        attachmentUrl =
+            await _uploadAttachmentIfNeeded(authProvider.currentUser!.id);
       } catch (e) {
         attachmentUrl = null;
         _showSnackBar('Photo upload failed: ${e.toString()}');
@@ -334,7 +346,8 @@ class _HomeScreenState extends State<HomeScreen> {
       String? voiceAudioUrl;
       if (_includeVoiceClip) {
         try {
-          voiceAudioUrl = await _uploadVoiceAudioIfNeeded(authProvider.currentUser!.id);
+          voiceAudioUrl =
+              await _uploadVoiceAudioIfNeeded(authProvider.currentUser!.id);
         } catch (e) {
           voiceAudioUrl = null;
           _showSnackBar('Audio attach failed: ${e.toString()}');
@@ -361,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       final analysis = crisisProvider.latestAnalysis;
-        final finalSeverity = _forceCriticalSeverity
+      final finalSeverity = _forceCriticalSeverity
           ? 'critical'
           : (analysis?.severity ?? 'medium');
       final requestId = await emergencyRequestProvider.createRequest(
@@ -433,13 +446,10 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Show SOS confirmation dialog
   void _showSOSConfirmation() {
     final crisisProvider = context.read<CrisisProvider>();
-    final locationProvider =
-        context.read<LocationProvider>();
-    final responderProvider =
-        context.read<ResponderProvider>();
+    final locationProvider = context.read<LocationProvider>();
+    final responderProvider = context.read<ResponderProvider>();
     final analysis = crisisProvider.latestAnalysis;
-    final emergencyRequestProvider =
-        context.read<EmergencyRequestProvider>();
+    final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
 
     showDialog(
       context: context,
@@ -746,20 +756,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openResponderProfile(ResponderModel responder) {
-    final locationProvider = context.read<LocationProvider>();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ResponderProfileScreen(
-          responder: responder,
-          viewerLatitude: locationProvider.latitude,
-          viewerLongitude: locationProvider.longitude,
-          isCurrentUserProfile: true,
-        ),
-      ),
-    );
-  }
-
   void _openAuthScreen() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -775,337 +771,554 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-void _showLanguagePicker() {
-  final settings = context.read<AppSettingsProvider>();
+  void _showLanguagePicker() {
+    final settings = context.read<AppSettingsProvider>();
 
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) {
-      return Container(
-        padding: const EdgeInsets.only(top: 12, bottom: 20),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(24),						  
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Container(
+          padding: const EdgeInsets.only(top: 12, bottom: 20),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(
+              top: Radius.circular(24),
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Drag handle
-            Container(
-              width: 40,
-              height: 5,
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag handle
+              Container(
+                width: 40,
+                height: 5,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
-            ),
 
-            // Title
-            const Text(
-              "Select Language",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+              // Title
+              const Text(
+                "Select Language",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
 
-            const SizedBox(height: 4),
+              const SizedBox(height: 4),
 
-            const Text(
-              "Choose your preferred language",
-              style: TextStyle(color: Colors.grey),
-            ),
+              const Text(
+                "Choose your preferred language",
+                style: TextStyle(color: Colors.grey),
+              ),
 
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: settings.availableLanguageCodes.length,
-                itemBuilder: (context, index) {
-                  final code = settings.availableLanguageCodes[index];
-                  final isSelected = settings.languageCode == code;
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: settings.availableLanguageCodes.length,
+                  itemBuilder: (context, index) {
+                    final code = settings.availableLanguageCodes[index];
+                    final isSelected = settings.languageCode == code;
 
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 4),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () {
-                        settings.setLanguage(code);
-                        Navigator.pop(sheetContext);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 14),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.blue.withOpacity(0.1)
-                              : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () {
+                          settings.setLanguage(code);
+                          Navigator.pop(sheetContext);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 14),
+                          decoration: BoxDecoration(
                             color: isSelected
-                                ? Colors.blue
-                                : Colors.transparent,
+                                ? Colors.blue.withValues(alpha: 0.1)
+                                : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color:
+                                  isSelected ? Colors.blue : Colors.transparent,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              // Language Icon
+                              CircleAvatar(
+                                backgroundColor: Colors.red.shade50,
+                                child: const Icon(Icons.language,
+                                    color: Colors.red),
+                              ),
+
+                              const SizedBox(width: 12),
+
+                              // Language Label
+                              Expanded(
+                                child: Text(
+                                  settings.languageLabel(code),
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: isSelected
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
+                                ),
+                              ),
+
+                              // Selected check
+                              if (isSelected)
+                                const Icon(Icons.check_circle,
+                                    color: Colors.red),
+                            ],
                           ),
                         ),
-                        child: Row(
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showAccountSheet() {
+    final authProvider = context.read<AuthProvider>();
+    final user = authProvider.currentUser;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        if (user == null) {
+          return const Padding(
+            padding: EdgeInsets.all(20),
+            child: Center(child: Text('Not signed in')),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                height: 4,
+                width: 40,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    child: Text(
+                      user.displayName.isNotEmpty
+                          ? user.displayName[0].toUpperCase()
+                          : 'U',
+                      style: const TextStyle(fontSize: 20),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user.displayName,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user.email.isEmpty
+                              ? (user.phoneNumber ?? 'No email')
+                              : user.email,
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Chip(
+                  label: Text(
+                    authProvider.isAnonymousUser
+                        ? 'Anonymous Session'
+                        : 'Registered Account',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Column(
+                children: [
+                  if (authProvider.isAnonymousUser)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          _openAuthScreen();
+                        },
+                        icon: const Icon(Icons.login),
+                        label: const Text('Sign In / Create Account'),
+                      ),
+                    ),
+                  if (!authProvider.isAnonymousUser)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          Navigator.of(sheetContext).pop();
+                          await _logoutRegisteredUser();
+                        },
+                        icon: const Icon(Icons.logout),
+                        label: const Text('Sign Out'),
+                      ),
+                    ),
+                  if (user.isResponder)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          _openResponderRequests();
+                        },
+                        icon: const Icon(Icons.list_alt),
+                        label: const Text('People Needing Help'),
+                      ),
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              // 🔹 Responder Section
+              if (user.isResponder)
+                Consumer<ResponderProvider>(
+                  builder: (context, responderProvider, _) {
+                    final mine = responderProvider.responders
+                        .where((r) => r.userId == user.id)
+                        .toList();
+
+                    final isAvailable =
+                        mine.isEmpty ? true : mine.first.isAvailable;
+
+                    return Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
                           children: [
-                            // Language Icon
-                            CircleAvatar(
-                              backgroundColor: Colors.red.shade50,
-                              child: const Icon(Icons.language,
-                                  color: Colors.red),
+                            SwitchListTile.adaptive(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Responder Online'),
+                              value: isAvailable,
+                              onChanged: _toggleAvailability,
                             ),
-
-                            const SizedBox(width: 12),
-
-                            // Language Label
-                            Expanded(
-                              child: Text(
-                                settings.languageLabel(code),
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed: () async {
+                                  Navigator.of(sheetContext).pop();
+                                  await _deregisterResponder();
+                                },
+                                child: const Text(
+                                  'De-register as responder',
+                                  style: TextStyle(color: Colors.red),
                                 ),
                               ),
                             ),
-
-                            // Selected check
-                            if (isSelected)
-                              const Icon(Icons.check_circle,
-                                  color: Colors.red),
                           ],
                         ),
                       ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      );
-    },
-  );
-}
-
-void _showAccountSheet() {
-  final authProvider = context.read<AuthProvider>();
-  final user = authProvider.currentUser;
-
-  showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
-    builder: (sheetContext) {
-      if (user == null) {
-        return const Padding(
-          padding: EdgeInsets.all(20),
-          child: Center(child: Text('Not signed in')),
-        );
-      }
-
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-
-            Container(
-              height: 4,
-              width: 40,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade400,
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  child: Text(
-                    user.displayName.isNotEmpty
-                        ? user.displayName[0].toUpperCase()
-                        : 'U',
-                    style: const TextStyle(fontSize: 20),
-                  ),
+                    );
+                  },
                 ),
-                const SizedBox(width: 12),
-                Expanded(
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showAccessibilitySheet() {
+    final settings = context.read<AppSettingsProvider>();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              decoration: const BoxDecoration(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                color: Colors.white,
+              ),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        user.displayName,
-                        style: Theme.of(context).textTheme.titleLarge,
+                      // Drag Handle
+                      Container(
+                        width: 40,
+                        height: 5,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        user.email.isEmpty
-                            ? (user.phoneNumber ?? 'No email')
-                            : user.email,
-                        style: TextStyle(color: Colors.grey.shade600),
+
+                      // 🔴 Header
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Colors.red, Colors.redAccent],
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          children: const [
+                            Icon(Icons.accessibility_new, color: Colors.white),
+                            SizedBox(width: 10),
+                            Text(
+                              'Accessibility',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // 🔧 Settings Cards
+                      _buildSwitchCard(
+                        title: 'Haptic vibration for SOS',
+                        icon: Icons.vibration,
+                        value: settings.hapticsEnabled,
+                        onChanged: (v) {
+                          settings.setHapticsEnabled(v);
+                          setModalState(() {});
+                        },
+                      ),
+
+                      _buildSwitchCard(
+                        title: 'Flash light pulse on SOS',
+                        subtitle: 'Uses device torch if available',
+                        icon: Icons.flashlight_on,
+                        value: settings.sosFlashEnabled,
+                        onChanged: (v) {
+                          settings.setSosFlashEnabled(v);
+                          setModalState(() {});
+                        },
+                      ),
+
+                      _buildSwitchCard(
+                        title: 'High contrast mode',
+                        icon: Icons.contrast,
+                        value: settings.highContrastEnabled,
+                        onChanged: (v) {
+                          settings.setHighContrastEnabled(v);
+                          setModalState(() {});
+                        },
+                      ),
+
+                      _buildSwitchCard(
+                        title: 'Enable notifications',
+                        subtitle: 'Local SOS status alerts',
+                        icon: Icons.notifications_active,
+                        value: settings.notificationsEnabled,
+                        onChanged: (value) async {
+                          if (value) {
+                            final granted =
+                                await NotificationService.requestPermissions();
+                            settings.setNotificationsEnabled(granted);
+
+                            if (!granted && mounted) {
+                              _showSnackBar(
+                                  'Notification permission not granted.');
+                            }
+                          } else {
+                            settings.setNotificationsEnabled(false);
+                          }
+                          setModalState(() {});
+                        },
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // 🔤 Text Size Card
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.text_fields,
+                                    color: Colors.red),
+                                const SizedBox(width: 8),
+                                const Expanded(child: Text('Text Size')),
+                                Text(
+                                  '${(settings.textScaleFactor * 100).round()}%',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                            SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                activeTrackColor: Colors.red,
+                                thumbColor: Colors.red,
+                              ),
+                              child: Slider(
+                                min: 0.85,
+                                max: 1.6,
+                                value: settings.textScaleFactor,
+                                onChanged: (value) {
+                                  settings.setTextScaleFactor(value);
+                                  setModalState(() {});
+                                },
+                              ),
+                            ),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  settings.setTextScaleFactor(1.0);
+                                  setModalState(() {});
+                                },
+                                icon: const Icon(Icons.restart_alt,
+                                    color: Colors.red),
+                                label: const Text(
+                                  'Reset',
+                                  style: TextStyle(color: Colors.red),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // 🧪 Test Buttons
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            onPressed: () {
+                              _announce(
+                                'Accessibility test announcement. SOS button is centered below information cards.',
+                              );
+                              _showSnackBar('Screen reader announcement sent.');
+                            },
+                            icon: const Icon(Icons.record_voice_over),
+                            label: const Text('Voice Test'),
+                          ),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              side: const BorderSide(color: Colors.red),
+                            ),
+                            onPressed: () async {
+                              await _pulseFlash();
+                              if (mounted) {
+                                _showSnackBar('Flash pulse test completed.');
+                              }
+                            },
+                            icon: const Icon(Icons.flashlight_on),
+                            label: const Text('Flash Test'),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Chip(
-                label: Text(
-                  authProvider.isAnonymousUser
-                      ? 'Anonymous Session'
-                      : 'Registered Account',
-                ),
               ),
-            ),
-            const SizedBox(height: 20),					
-            Column(
-              children: [	 
-                if (authProvider.isAnonymousUser)
-                  SizedBox(
-                    width: double.infinity,		   
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(sheetContext).pop();
-                        _openAuthScreen();
-                      },
-                      icon: const Icon(Icons.login),
-                      label: const Text('Sign In / Create Account'),
-                    ),
-                  ),
+            );
+          },
+        );
+      },
+    );
+  }
 
-                if (!authProvider.isAnonymousUser)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        Navigator.of(sheetContext).pop();
-                        await _logoutRegisteredUser();
-                      },
-                      icon: const Icon(Icons.logout),
-                      label: const Text('Sign Out'),
-                    ),
-                  ),
+  void _showCommsSimulationSheet() {
+    final comms = context.read<CommsProvider>();
 
-                if (user.isResponder)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.of(sheetContext).pop();
-                        _openResponderRequests();
-                      },
-                      icon: const Icon(Icons.list_alt),
-                      label: const Text('People Needing Help'),
-                    ),
-				  
-                  ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // 🔹 Responder Section
-            if (user.isResponder)
-              Consumer<ResponderProvider>(
-                builder: (context, responderProvider, _) {
-                  final mine = responderProvider.responders
-                      .where((r) => r.userId == user.id)
-                      .toList();
-
-                  final isAvailable =
-                      mine.isEmpty ? true : mine.first.isAvailable;
-
-                  return Card(
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          SwitchListTile.adaptive(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('Responder Online'),
-                            value: isAvailable,
-                            onChanged: _toggleAvailability,
-                          ),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: () async {
-                                Navigator.of(sheetContext).pop();
-                                await _deregisterResponder();
-                              },
-                              child: const Text(
-                                'De-register as responder',
-                                style: TextStyle(color: Colors.red),
-                              ),			  
-                            ),
-							  
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
               ),
-          ],
-        ),
-      );
-    },
-  );
-}
-
-void _showAccessibilitySheet() {
-  final settings = context.read<AppSettingsProvider>();
-
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) {
-      return StatefulBuilder(
-        builder: (context, setModalState) {
-          return Container(
-            decoration: const BoxDecoration(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              color: Colors.white,
-            ),
-            child: SingleChildScrollView(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-
                     // Drag Handle
-                    Container(
-                      width: 40,
-                      height: 5,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 5,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
 
@@ -1121,11 +1334,10 @@ void _showAccessibilitySheet() {
                       ),
                       child: Row(
                         children: const [
-                          Icon(Icons.accessibility_new,
-                              color: Colors.white),
+                          Icon(Icons.wifi_tethering, color: Colors.white),
                           SizedBox(width: 10),
                           Text(
-                            'Accessibility',
+                            'Comms Simulation',
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 18,
@@ -1135,346 +1347,120 @@ void _showAccessibilitySheet() {
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: Colors.red.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<CommsMode>(
+                          value: comms.mode,
+                          isExpanded: true,
+                          icon: const Icon(Icons.keyboard_arrow_down,
+                              color: Colors.red),
+                          dropdownColor: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
 
-                    // 🔧 Settings Cards
-                    _buildSwitchCard(
-                      title: 'Haptic vibration for SOS',
-                      icon: Icons.vibration,
-                      value: settings.hapticsEnabled,
-                      onChanged: (v) {
-                        settings.setHapticsEnabled(v);
-                        setModalState(() {});
-                      },
-                    ),
+                          // Selected item display
+                          selectedItemBuilder: (context) {
+                            return CommsMode.values.map((mode) {
+                              return Row(
+                                children: [
+                                  Text(
+                                    comms.modeLabel(mode),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }).toList();
+                          },
 
-                    _buildSwitchCard(
-                      title: 'Flash light pulse on SOS',
-                      subtitle: 'Uses device torch if available',
-                      icon: Icons.flashlight_on,
-                      value: settings.sosFlashEnabled,
-                      onChanged: (v) {
-                        settings.setSosFlashEnabled(v);
-                        setModalState(() {});
-                      },
-                    ),
+                          items: CommsMode.values.map((mode) {
+                            return DropdownMenuItem<CommsMode>(
+                              value: mode,
+                              child: Row(
+                                children: [
+                                  Text(comms.modeLabel(mode)),
+                                ],
+                              ),
+                            );
+                          }).toList(),
 
-                    _buildSwitchCard(
-                      title: 'High contrast mode',
-                      icon: Icons.contrast,
-                      value: settings.highContrastEnabled,
-                      onChanged: (v) {
-                        settings.setHighContrastEnabled(v);
-                        setModalState(() {});
-                      },
-                    ),
-
-                    _buildSwitchCard(
-                      title: 'Enable notifications',
-                      subtitle: 'Local SOS status alerts',
-                      icon: Icons.notifications_active,
-                      value: settings.notificationsEnabled,
-                      onChanged: (value) async {
-                        if (value) {
-                          final granted =
-                              await NotificationService.requestPermissions();
-                          settings.setNotificationsEnabled(granted);
-
-                          if (!granted && mounted) {
-                            _showSnackBar(
-                                'Notification permission not granted.');
-                          }
-                        } else {
-                          settings.setNotificationsEnabled(false);
-                        }		 
-                        setModalState(() {});
-                      },
+                          onChanged: (value) {
+                            if (value != null) {
+                              comms.setMode(value);
+                              setModalState(() {});
+                            }
+                          },
+                        ),
+                      ),
                     ),
 
                     const SizedBox(height: 12),
 
-                    // 🔤 Text Size Card
+                    // 🔧 Switch Cards
+                    _buildCommsSwitch(
+                      title: 'Simulate tower failure',
+                      icon: Icons.signal_cellular_off,
+                      value: comms.simulateTowerFailure,
+                      onChanged: (v) {
+                        comms.setSimulateTowerFailure(v);
+                        setModalState(() {});
+                      },
+                    ),
+
+                    _buildCommsSwitch(
+                      title: 'Device supports satellite',
+                      subtitle: 'Simulated capability',
+                      icon: Icons.satellite_alt,
+                      value: comms.deviceSupportsSatellite,
+                      onChanged: (v) {
+                        comms.setDeviceSupportsSatellite(v);
+                        setModalState(() {});
+                      },
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    // ⚠️ Info Box
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(18),
+                        color: Colors.red.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
                       ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.text_fields,
-                                  color: Colors.red),
-                              const SizedBox(width: 8),
-                              const Expanded(child: Text('Text Size')),
-                              Text(
-                                '${(settings.textScaleFactor * 100).round()}%',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                          SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              activeTrackColor: Colors.red,
-                              thumbColor: Colors.red,
-                            ),
-                            child: Slider(
-                              min: 0.85,
-                              max: 1.6,
-                              value: settings.textScaleFactor,
-                              onChanged: (value) {
-                                settings.setTextScaleFactor(value);
-                                setModalState(() {});
-                              },
-                            ),
-                          ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              onPressed: () {
-                                settings.setTextScaleFactor(1.0);
-                                setModalState(() {});
-                              },
-                              icon: const Icon(Icons.restart_alt,
-                                  color: Colors.red),
-                              label: const Text(
-                                'Reset',
-                                style: TextStyle(color: Colors.red),
-                              ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Icon(Icons.info_outline, color: Colors.red),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'This simulation allows testing disaster or lockdown connectivity fallback without real mesh or satellite hardware.',
+                              style: TextStyle(fontSize: 13),
                             ),
                           ),
                         ],
                       ),
                     ),
-
-                    const SizedBox(height: 14),
-
-                    // 🧪 Test Buttons
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          onPressed: () {
-                            _announce(
-                              'Accessibility test announcement. SOS button is centered below information cards.',
-                            );
-                            _showSnackBar(
-                                'Screen reader announcement sent.');
-                          },
-                          icon: const Icon(Icons.record_voice_over),
-                          label: const Text('Voice Test'),
-                        ),
-                        OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                          ),
-                          onPressed: () async {
-                            await _pulseFlash();
-                            if (mounted) {
-                              _showSnackBar(
-                                  'Flash pulse test completed.');
-                            }
-                          },
-                          icon: const Icon(Icons.flashlight_on),
-                          label: const Text('Flash Test'),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
               ),
-            ),
-          );
-        },
-      );
-    },
-  );
-}
-
-void _showCommsSimulationSheet() {
-  final comms = context.read<CommsProvider>();
-
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: Colors.transparent,
-    isScrollControlled: true,
-    builder: (sheetContext) {
-      return StatefulBuilder(
-        builder: (context, setModalState) {
-          return Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-
-                  // Drag Handle
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 5,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
-
-                  // 🔴 Header
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Colors.red, Colors.redAccent],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: const [
-                        Icon(Icons.wifi_tethering, color: Colors.white),
-                        SizedBox(width: 10),
-                        Text(
-                          'Comms Simulation',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                 Container(
-  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-  decoration: BoxDecoration(
-    color: Colors.grey.shade100,
-    borderRadius: BorderRadius.circular(18),
-    border: Border.all(
-      color: Colors.red.withOpacity(0.3),
-    ),
-  ),
-  child: DropdownButtonHideUnderline(
-    child: DropdownButton<CommsMode>(
-      value: comms.mode,
-      isExpanded: true,
-      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.red),
-      dropdownColor: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-
-      // Selected item display
-      selectedItemBuilder: (context) {
-        return CommsMode.values.map((mode) {
-          return Row(
-            children: [
-              Text(
-                comms.modeLabel(mode),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          );
-        }).toList();
-      },
-
-      items: CommsMode.values.map((mode) {
-        return DropdownMenuItem<CommsMode>(
-          value: mode,
-          child: Row(
-            children: [
-              Text(comms.modeLabel(mode)),
-            ],
-          ),
+            );
+          },
         );
-      }).toList(),
-
-      onChanged: (value) {
-        if (value != null) {
-          comms.setMode(value);
-          setModalState(() {});
-        }
       },
-    ),
-  ),
-),
-
-                  const SizedBox(height: 12),
-
-                  // 🔧 Switch Cards
-                  _buildCommsSwitch(
-                    title: 'Simulate tower failure',
-                    icon: Icons.signal_cellular_off, 
-                    value: comms.simulateTowerFailure,
-                    onChanged: (v) {
-                      comms.setSimulateTowerFailure(v);
-                      setModalState(() {});
-                    },
-                  ),
-
-                  _buildCommsSwitch(
-                    title: 'Device supports satellite',
-                    subtitle: 'Simulated capability',
-                    icon: Icons.satellite_alt,
-                    value: comms.deviceSupportsSatellite,
-                    onChanged: (v) {
-                      comms.setDeviceSupportsSatellite(v);
-                      setModalState(() {});
-                    },
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // ⚠️ Info Box
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.red.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Icon(Icons.info_outline, color: Colors.red),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'This simulation allows testing disaster or lockdown connectivity fallback without real mesh or satellite hardware.',
-                            style: TextStyle(fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-			
-          );
-        },
-      );
-    },
-  );
-}
+    );
+  }
 
   Future<void> _deregisterResponder() async {
     final authProvider = context.read<AuthProvider>();
@@ -1509,7 +1495,8 @@ void _showCommsSimulationSheet() {
       isAvailable: value,
     );
 
-    final mine = responderProvider.responders.where((r) => r.userId == userId).toList();
+    final mine =
+        responderProvider.responders.where((r) => r.userId == userId).toList();
     final profile = mine.isEmpty ? null : mine.first;
     await NotificationService.syncDeviceProfile(
       userId: userId,
@@ -1567,7 +1554,8 @@ void _showCommsSimulationSheet() {
             _transcriptionConfidence = null;
           }
           if (words.isNotEmpty &&
-              (result.finalResult || _emergencyContextController.text.trim().isEmpty)) {
+              (result.finalResult ||
+                  _emergencyContextController.text.trim().isEmpty)) {
             _emergencyContextController.text = words;
             _emergencyContextController.selection = TextSelection.fromPosition(
               TextPosition(offset: _emergencyContextController.text.length),
@@ -1581,7 +1569,8 @@ void _showCommsSimulationSheet() {
       ),
       listenFor: const Duration(minutes: 2),
       pauseFor: const Duration(seconds: 8),
-      localeId: _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
+      localeId: _speechLocaleForLanguage(
+          context.read<AppSettingsProvider>().languageCode),
     );
 
     if (mounted) {
@@ -1594,7 +1583,8 @@ void _showCommsSimulationSheet() {
   Future<void> _toggleVoiceClipRecording() async {
     final canRecordAudio = await _audioRecorder.hasPermission();
     if (!canRecordAudio) {
-      _showSnackBar('Microphone permission is required for voice clip recording.');
+      _showSnackBar(
+          'Microphone permission is required for voice clip recording.');
       return;
     }
 
@@ -1614,7 +1604,8 @@ void _showCommsSimulationSheet() {
     }
 
     final tempDir = await getTemporaryDirectory();
-    final voicePath = '${tempDir.path}/clip_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final voicePath =
+        '${tempDir.path}/clip_${DateTime.now().millisecondsSinceEpoch}.wav';
     await _audioRecorder.start(
       const RecordConfig(
         encoder: AudioEncoder.wav,
@@ -1780,7 +1771,8 @@ void _showCommsSimulationSheet() {
           ),
           if (statusIcon != null) ...[
             const SizedBox(width: 8),
-            Icon(statusIcon, size: 16, color: statusColor ?? Colors.green.shade700),
+            Icon(statusIcon,
+                size: 16, color: statusColor ?? Colors.green.shade700),
           ],
           const SizedBox(width: 2),
           IconButton(
@@ -1866,7 +1858,8 @@ void _showCommsSimulationSheet() {
     if (image == null) {
       return null;
     }
-    return _mediaUploadService.uploadEmergencyImage(image: image, userId: userId);
+    return _mediaUploadService.uploadEmergencyImage(
+        image: image, userId: userId);
   }
 
   Future<String?> _uploadVoiceAudioIfNeeded(String userId) async {
@@ -1874,7 +1867,8 @@ void _showCommsSimulationSheet() {
     if (localPath == null || localPath.trim().isEmpty) {
       return null;
     }
-    return _mediaUploadService.uploadEmergencyVoice(localPath: localPath, userId: userId);
+    return _mediaUploadService.uploadEmergencyVoice(
+        localPath: localPath, userId: userId);
   }
 
   @override
@@ -1893,27 +1887,25 @@ void _showCommsSimulationSheet() {
     final settings = context.watch<AppSettingsProvider>();
     final authProvider = context.watch<AuthProvider>();
     final commsProvider = context.watch<CommsProvider>();
-		
-	 // Build icon list dynamically
-        final List<IconData> iconList = [
-          Icons.language,
-          Icons.chat_bubble_outline,
-          if (authProvider.currentUser?.isResponder == true)
-            Icons.support_agent,
-          Icons.map,
-          Icons.account_circle,
-        ];
+    final crisisProvider = context.watch<CrisisProvider>();
 
-        // Map actions
-        final List<VoidCallback> actions = [
-          _showLanguagePicker,
-          _openChats,
-          if (authProvider.currentUser?.isResponder == true)
-            _openResponderRequests,
-          _openMap,
-          _showAccountSheet,
-        ];
-										 
+    // Build icon list dynamically
+    final List<IconData> iconList = [
+      Icons.language,
+      Icons.chat_bubble_outline,
+      if (authProvider.currentUser?.isResponder == true) Icons.support_agent,
+      Icons.map,
+      Icons.account_circle,
+    ];
+
+    // Map actions
+    final List<VoidCallback> actions = [
+      _showLanguagePicker,
+      _openChats,
+      if (authProvider.currentUser?.isResponder == true) _openResponderRequests,
+      _openMap,
+      _showAccountSheet,
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -1922,7 +1914,7 @@ void _showCommsSimulationSheet() {
         elevation: 0,
         backgroundColor: Colors.red.shade700,
         actions: [
-           IconButton(
+          IconButton(
             icon: const Icon(Icons.accessibility_new),
             onPressed: _showAccessibilitySheet,
             tooltip: 'Accessibility',
@@ -1935,488 +1927,534 @@ void _showCommsSimulationSheet() {
         ],
       ),
       body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 20),
-          child: Column(
-            children: [
-              // Top section: Info
-              Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      settings.t('emergency_prompt'),
-                      style: Theme.of(context).textTheme.headlineSmall,
-                      textAlign: TextAlign.center,
-                    ),
-                    Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Consumer<ResponderProvider>(
-          builder: (context, responderProvider, _) {
-            return IntrinsicHeight(
-              child :Row(
-              children: [
-                Expanded(
-                  child: _actionCard(
-                    title: settings.t('total_responders'),
-                    value:
-                        responderProvider.responders.length.toString(),
-                    icon: Icons.people,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _actionCard(
-                    title: settings.t('nearby_5km'),
-                    value: responderProvider
-                        .nearbyResponders.length
-                        .toString(),
-                    icon: Icons.location_on,
-                  ),
-                ),
-                ]
-                ));})),	
-                
-                						
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _openResponderAction,
-                        icon: const Icon(Icons.health_and_safety),
-                        label: Text(
-                          authProvider.currentUser?.isResponder == true
-                              ? 'Responder Dashboard'
-                              : settings.t('become_responder'),
+          child: Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Column(children: [
+                // Top section: Info
+                Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(
+                        settings.t('emergency_prompt'),
+                        style: Theme.of(context).textTheme.headlineSmall,
+                        textAlign: TextAlign.center,
+                      ),
+                      Padding(
+                          padding: const EdgeInsets.all(20.0),
+                          child: Consumer<ResponderProvider>(
+                              builder: (context, responderProvider, _) {
+                            return IntrinsicHeight(
+                                child: Row(children: [
+                              Expanded(
+                                child: _actionCard(
+                                  title: settings.t('total_responders'),
+                                  value: responderProvider.responders.length
+                                      .toString(),
+                                  icon: Icons.people,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: _actionCard(
+                                  title: settings.t('nearby_5km'),
+                                  value: responderProvider
+                                      .nearbyResponders.length
+                                      .toString(),
+                                  icon: Icons.location_on,
+                                ),
+                              ),
+                            ]));
+                          })),
+
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _openResponderAction,
+                          icon: const Icon(Icons.health_and_safety),
+                          label: Text(
+                            authProvider.currentUser?.isResponder == true
+                                ? 'Responder Dashboard'
+                                : settings.t('become_responder'),
+                          ),
                         ),
                       ),
-                    ),
-                    
-                    const SizedBox(height: 8),
-					                    TextField(
-  controller: _emergencyContextController,
-  minLines: 1,
-  maxLines: 3,
-  cursorColor: Colors.red,
 
-  decoration: InputDecoration(
-    labelText: 'Emergency details (optional)',
-    hintText:
-        'Example: elderly person fell, flood nearby, child missing, no transport',
-
-    filled: true,
-    fillColor: Colors.red.shade50,
-
-    border: OutlineInputBorder(												   
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.red.shade200),
-    ),
-
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.red.shade300, width: 1.2),													   
-    ),
-
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.red.shade600, width: 2),
-						  
-    ),
-
-    errorBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: const BorderSide(color: Colors.red),
-					  
-    ),
-
-    labelStyle: TextStyle(color: Colors.red.shade700),
-    hintStyle: TextStyle(color: Colors.red.shade300),				  
-    contentPadding: const EdgeInsets.symmetric(
-      horizontal: 16,
-      vertical: 14,									 
-    ),
-
-    prefixIcon: Icon(
-      Icons.warning_amber_rounded,											
-      color: Colors.red.shade400,
-    ),
-  ),					  
-),
-										   
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          IconButton.filledTonal(
-                            tooltip: _isTranscribing ? 'Stop voice-to-text' : 'Voice to text',
-                            onPressed: _speechReady ? _toggleVoiceInput : null,
-                            icon: Icon(_isTranscribing ? Icons.stop : Icons.mic),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _emergencyContextController,
+                        minLines: 1,
+                        maxLines: 3,
+                        cursorColor: Colors.red,
+                        decoration: InputDecoration(
+                          labelText: 'Emergency details (optional)',
+                          hintText:
+                              'Example: elderly person fell, flood nearby, child missing, no transport',
+                          filled: true,
+                          fillColor: Colors.red.shade50,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(color: Colors.red.shade200),
                           ),
-                          IconButton.filledTonal(
-                            tooltip: _isRecordingClip ? 'Stop voice clip' : 'Record voice clip',
-                            onPressed: _toggleVoiceClipRecording,
-                            icon: Icon(
-                              _isRecordingClip ? Icons.stop_circle : Icons.keyboard_voice_rounded,
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(
+                                color: Colors.red.shade300, width: 1.2),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(
+                                color: Colors.red.shade600, width: 2),
+                          ),
+                          errorBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(color: Colors.red),
+                          ),
+                          labelStyle: TextStyle(color: Colors.red.shade700),
+                          hintStyle: TextStyle(color: Colors.red.shade300),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.red.shade400,
+                          ),
+                        ),
+                      ),
+
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            IconButton.filledTonal(
+                              tooltip: _isTranscribing
+                                  ? 'Stop voice-to-text'
+                                  : 'Voice to text',
+                              onPressed:
+                                  _speechReady ? _toggleVoiceInput : null,
+                              icon: Icon(
+                                  _isTranscribing ? Icons.stop : Icons.mic),
                             ),
-                          ),
-                          IconButton.filledTonal(
-                            tooltip: _isPreviewPlaying ? 'Stop preview' : 'Play preview',
-                            onPressed: (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
-                                ? _toggleLocalVoicePreview
-                                : null,
-                            icon: Icon(_isPreviewPlaying ? Icons.stop : Icons.play_arrow),
-                          ),
-                          if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.blueGrey.shade50,
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: Colors.blueGrey.shade100),
+                            IconButton.filledTonal(
+                              tooltip: _isRecordingClip
+                                  ? 'Stop voice clip'
+                                  : 'Record voice clip',
+                              onPressed: _toggleVoiceClipRecording,
+                              icon: Icon(
+                                _isRecordingClip
+                                    ? Icons.stop_circle
+                                    : Icons.keyboard_voice_rounded,
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _includeVoiceClip ? Icons.link : Icons.link_off,
-                                    size: 15,
-                                    color: _includeVoiceClip
+                            ),
+                            IconButton.filledTonal(
+                              tooltip: _isPreviewPlaying
+                                  ? 'Stop preview'
+                                  : 'Play preview',
+                              onPressed: (_voiceAudioPath != null &&
+                                      _voiceAudioPath!.isNotEmpty)
+                                  ? _toggleLocalVoicePreview
+                                  : null,
+                              icon: Icon(_isPreviewPlaying
+                                  ? Icons.stop
+                                  : Icons.play_arrow),
+                            ),
+                            if (_voiceAudioPath != null &&
+                                _voiceAudioPath!.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.blueGrey.shade50,
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                      color: Colors.blueGrey.shade100),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _includeVoiceClip
+                                          ? Icons.link
+                                          : Icons.link_off,
+                                      size: 15,
+                                      color: _includeVoiceClip
+                                          ? Colors.teal.shade700
+                                          : Colors.grey.shade600,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      _isRecordingClip
+                                          ? Icons.fiber_manual_record
+                                          : Icons.check_circle,
+                                      size: 15,
+                                      color: _isRecordingClip
+                                          ? Colors.red.shade700
+                                          : Colors.green.shade700,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            IconButton.filledTonal(
+                              tooltip: 'Capture photo',
+                              onPressed: _pickCameraImage,
+                              icon: const Icon(Icons.camera_alt),
+                            ),
+                            FilterChip(
+                              selected: _forceCriticalSeverity,
+                              label: const Text('Force Critical'),
+                              selectedColor: Colors.red.shade100,
+                              checkmarkColor: Colors.red.shade800,
+                              onSelected: (value) {
+                                setState(() {
+                                  _forceCriticalSeverity = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          commsProvider.forceOfflineAi
+                              ? 'Visual AI disabled (Local fallback)'
+                              : 'Visual AI enabled (Gemini multimodal)',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: commsProvider.forceOfflineAi
+                                        ? Colors.orange.shade800
+                                        : Colors.blue.shade800,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                        ),
+                      ),
+                      if (crisisProvider.latestAnalysis != null)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'AI status: ${crisisProvider.latestAnalysis!.aiStatus == '"' "'gemini_success'" '"' ? '"' "'Gemini API response received'" '"' : crisisProvider.latestAnalysis!.aiStatus == '"' "'missing_api_key'" '"' ? '"' "'Gemini key missing, local fallback used'" '"' : crisisProvider.latestAnalysis!.aiStatus == '"' "'forced_offline'" '"' ? '"' "'Simulation mode forced local fallback'" '"' : crisisProvider.latestAnalysis!.aiStatus == '"' "'gemini_empty_response'" '"' ? '"' "'Gemini returned empty response, local fallback used'" '"' : crisisProvider.latestAnalysis!.aiStatus == '"' "'gemini_error'" '"' ? '"' "'Gemini call failed, local fallback used'" '"' : '"' "'Local heuristic response'" '"'}',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Colors.blueGrey.shade700,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _cloudTranscriptionEnabled
+                              ? 'Transcription: Cloud assist enabled'
+                              : 'Transcription: On-device only (free mode)',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: _cloudTranscriptionEnabled
+                                        ? Colors.teal.shade800
+                                        : Colors.green.shade800,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                        ),
+                      ),
+                      if (_voiceTranscript != null &&
+                          _voiceTranscript!.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            Chip(
+                              avatar: const Icon(Icons.subtitles, size: 18),
+                              label: Text(
+                                _transcriptionConfidence == null
+                                    ? 'Transcript ready'
+                                    : 'Transcript ${(_transcriptionConfidence! * 100).toStringAsFixed(0)}%',
+                              ),
+                            ),
+                            if (_transcriptionProvider.isNotEmpty)
+                              Chip(
+                                avatar: const Icon(
+                                    Icons.mic_external_on_outlined,
+                                    size: 18),
+                                label: Text(_transcriptionProvider),
+                              ),
+                          ],
+                        ),
+                      ],
+                      if (_selectedImage != null ||
+                          (_voiceAudioPath != null &&
+                              _voiceAudioPath!.isNotEmpty)) ...[
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                if (_selectedImage != null)
+                                  _buildAttachmentCard(
+                                    icon: Icons.image_outlined,
+                                    fileName: _selectedImage!.name.isEmpty
+                                        ? 'photo_attachment.jpg'
+                                        : _selectedImage!.name,
+                                    fileKind: 'Photo attachment',
+                                    semanticsLabel: 'View attached photo',
+                                    onOpen: _previewSelectedPhoto,
+                                    onRemove: _removePhotoAttachment,
+                                  ),
+                                if (_selectedImage != null &&
+                                    _voiceAudioPath != null &&
+                                    _voiceAudioPath!.isNotEmpty)
+                                  const SizedBox(width: 8),
+                                if (_voiceAudioPath != null &&
+                                    _voiceAudioPath!.isNotEmpty)
+                                  _buildAttachmentCard(
+                                    icon: Icons.graphic_eq_rounded,
+                                    fileName: 'voice_clip.wav',
+                                    fileKind: 'Voice attachment',
+                                    semanticsLabel: 'Play attached voice clip',
+                                    onOpen: _toggleLocalVoicePreview,
+                                    onRemove: () {
+                                      _removeVoiceAttachment();
+                                    },
+                                    statusIcon: _includeVoiceClip
+                                        ? Icons.link
+                                        : Icons.link_off,
+                                    statusColor: _includeVoiceClip
                                         ? Colors.teal.shade700
                                         : Colors.grey.shade600,
                                   ),
-                                  const SizedBox(width: 6),
-                                  Icon(
-                                    _isRecordingClip
-                                        ? Icons.fiber_manual_record
-                                        : Icons.check_circle,
-                                    size: 15,
-                                    color: _isRecordingClip
-                                        ? Colors.red.shade700
-                                        : Colors.green.shade700,
-                                  ),
-                                ],
-                              ),
+                              ],
                             ),
-                          IconButton.filledTonal(
-                            tooltip: 'Capture photo',
-                            onPressed: _pickCameraImage,
-                            icon: const Icon(Icons.camera_alt),
                           ),
-                          FilterChip(
-                            selected: _forceCriticalSeverity,
-                            label: const Text('Force Critical'),
-                            selectedColor: Colors.red.shade100,
-                            checkmarkColor: Colors.red.shade800,
-                            onSelected: (value) {
-                              setState(() {
-                                _forceCriticalSeverity = value;
-                              });
-                            },
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: commsProvider.forceOfflineAi
+                              ? Colors.orange.shade50
+                              : Colors.blue.shade50,
+                          border: Border.all(
+                            color: commsProvider.forceOfflineAi
+                                ? Colors.orange.shade300
+                                : Colors.blue.shade300,
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        commsProvider.forceOfflineAi
-                            ? 'Visual AI disabled (Local fallback)'
-                            : 'Visual AI enabled (Gemini multimodal)',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              commsProvider.forceOfflineAi
+                                  ? Icons.cloud_off
+                                  : Icons.auto_awesome,
+                              size: 18,
                               color: commsProvider.forceOfflineAi
                                   ? Colors.orange.shade800
                                   : Colors.blue.shade800,
-                              fontWeight: FontWeight.w600,
                             ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        _cloudTranscriptionEnabled
-                            ? 'Transcription: Cloud assist enabled'
-                            : 'Transcription: On-device only (free mode)',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: _cloudTranscriptionEnabled
-                                  ? Colors.teal.shade800
-                                  : Colors.green.shade800,
-                              fontWeight: FontWeight.w600,
+                            const SizedBox(width: 8),
+                            Text(
+                              commsProvider.forceOfflineAi
+                                  ? 'Local Fallback'
+                                  : 'Powered by Gemini',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                    color: commsProvider.forceOfflineAi
+                                        ? Colors.orange.shade900
+                                        : Colors.blue.shade900,
+                                  ),
                             ),
-                      ),
-                    ),
-                    if (_voiceTranscript != null && _voiceTranscript!.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          Chip(
-                            avatar: const Icon(Icons.subtitles, size: 18),
-                            label: Text(
-                              _transcriptionConfidence == null
-                                  ? 'Transcript ready'
-                                  : 'Transcript ${( _transcriptionConfidence! * 100).toStringAsFixed(0)}%',
-                            ),
-                          ),
-                          if (_transcriptionProvider.isNotEmpty)
-                            Chip(
-                              avatar: const Icon(Icons.mic_external_on_outlined, size: 18),
-                              label: Text(_transcriptionProvider),
-                            ),
-                        ],
-                      ),
-                    ],
-                    if (_selectedImage != null ||
-                        (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              if (_selectedImage != null)
-                                _buildAttachmentCard(
-                                  icon: Icons.image_outlined,
-                                  fileName: _selectedImage!.name.isEmpty
-                                      ? 'photo_attachment.jpg'
-                                      : _selectedImage!.name,
-                                  fileKind: 'Photo attachment',
-                                  semanticsLabel: 'View attached photo',
-                                  onOpen: _previewSelectedPhoto,
-                                  onRemove: _removePhotoAttachment,
-                                ),
-                              if (_selectedImage != null &&
-                                  _voiceAudioPath != null &&
-                                  _voiceAudioPath!.isNotEmpty)
-                                const SizedBox(width: 8),
-                              if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
-                                _buildAttachmentCard(
-                                  icon: Icons.graphic_eq_rounded,
-                                  fileName: 'voice_clip.wav',
-                                  fileKind: 'Voice attachment',
-                                  semanticsLabel: 'Play attached voice clip',
-                                  onOpen: _toggleLocalVoicePreview,
-                                  onRemove: () {
-                                    _removeVoiceAttachment();
-                                  },
-                                  statusIcon:
-                                      _includeVoiceClip ? Icons.link : Icons.link_off,
-                                  statusColor: _includeVoiceClip
-                                      ? Colors.teal.shade700
-                                      : Colors.grey.shade600,
-                                ),
-                            ],
-                          ),
+                          ],
                         ),
                       ),
-                    ],
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: commsProvider.forceOfflineAi
-                            ? Colors.orange.shade50
-                            : Colors.blue.shade50,
-                        border: Border.all(
-                          color: commsProvider.forceOfflineAi
-                              ? Colors.orange.shade300
-                              : Colors.blue.shade300,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            commsProvider.forceOfflineAi ? Icons.cloud_off : Icons.auto_awesome,
-                            size: 18,
-                            color: commsProvider.forceOfflineAi
-                                ? Colors.orange.shade800
-                                : Colors.blue.shade800,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            commsProvider.forceOfflineAi
-                                ? 'Local Fallback'
-                                : 'Powered by Gemini',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                  color: commsProvider.forceOfflineAi
-                                      ? Colors.orange.shade900
-                                      : Colors.blue.shade900,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    // Location status
+                      const SizedBox(height: 20),
+                      // Location status
                       Consumer<LocationProvider>(
-  builder: (context, locationProvider, _) {
-										 
-    final isReady = locationProvider.hasLocation;
+                        builder: (context, locationProvider, _) {
+                          final isReady = locationProvider.hasLocation;
 
-    return !isReady ?Container(
-      margin: const EdgeInsets.symmetric( vertical: 10),
-      padding: const EdgeInsets.symmetric( horizontal: 16,vertical: 14),
-      decoration: BoxDecoration(								
-        color: Colors.black,
-							  
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          // LEFT TEXT + ICON
-          Expanded(
-            child: Row(
-              children: [
-                Icon(
-															   
-                  isReady ? Icons.location_on : Icons.location_off,
-                  color: isReady ? Colors.greenAccent : Colors.orangeAccent,					
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    isReady
-                        ? settings.t('location_ready')
-                        : settings.t('location_not_ready'),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
-                    ),
+                          return !isReady
+                              ? Container(
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 10),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      // LEFT TEXT + ICON
+                                      Expanded(
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              isReady
+                                                  ? Icons.location_on
+                                                  : Icons.location_off,
+                                              color: isReady
+                                                  ? Colors.greenAccent
+                                                  : Colors.orangeAccent,
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Text(
+                                                isReady
+                                                    ? settings
+                                                        .t('location_ready')
+                                                    : settings.t(
+                                                        'location_not_ready'),
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+
+                                      // RIGHT BUTTON
+                                      if (!isReady)
+                                        _actionChip(
+                                            label: "Fix",
+                                            onTap: () async {
+                                              if (!locationProvider
+                                                  .hasLocation) {
+                                                await locationProvider
+                                                    .openPermissionSettings();
+                                              } else {
+                                                await locationProvider
+                                                    .openLocationSettings();
+                                              }
+                                            }),
+                                    ],
+                                  ),
+                                )
+                              : SizedBox(height: 50);
+                        },
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-
-          // RIGHT BUTTON
-          if (!isReady)
-            _actionChip(
-              label: "Fix",				  
-              onTap: () async {
-  if (!locationProvider.hasLocation) {												 
-    await locationProvider.openPermissionSettings();
-  } else {												 
-    await locationProvider.openLocationSettings();
-  }
-}
-            ),
-        ],
-      ),
-    ): SizedBox(height: 50);				  
-  },
-),
-                  ],
-                ),
-              ),
-              // Center section: SOS Button
-              Consumer<AuthProvider>(
-                builder: (context, authProvider, _) {
-                  return Consumer<ResponderProvider>(
-                    builder: (context, responderProvider, _) {
-                      return SOSButton(
-                        onPressed: _handleSOSPress,
-                        isLoading: _isSosInProgress,
-                        enableHaptics: settings.hapticsEnabled,
-                      );
-                    },
-                  );
-                },
-              ),
-
-              const SizedBox(height: 20),
-
-              // Bottom section: Quick info
-              Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  children: [
-                    // Responders status
-                    Consumer<ResponderProvider>(
+                // Center section: SOS Button
+                Consumer<AuthProvider>(
+                  builder: (context, authProvider, _) {
+                    return Consumer<ResponderProvider>(
                       builder: (context, responderProvider, _) {
-                        return Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.purple.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.purple),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    settings.t('total_responders'),
-                                    style: Theme.of(context)
-                                        .textTheme.labelLarge,
-                                  ),
-                                  Text(
-                                    responderProvider.responders.length
-                                        .toString(),
-                                    style: Theme.of(context)
-                                        .textTheme.headlineSmall,
-                                  ),
-                                ],
-                              ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    settings.t('nearby_5km'),
-                                    style: Theme.of(context)
-                                        .textTheme.labelLarge,
-                                  ),
-                                  Text(
-                                    responderProvider.nearbyResponders.length
-                                        .toString(),
-                                    style: Theme.of(context)
-                                        .textTheme.headlineSmall
-                                        ?.copyWith(
-                                      color: Colors.purple,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
+                        return SOSButton(
+                          onPressed: _handleSOSPress,
+                          isLoading: _isSosInProgress,
+                          enableHaptics: settings.hapticsEnabled,
                         );
                       },
-                    ),
-                  ],
+                    );
+                  },
                 ),
-              ),
-              ]))),
-          bottomNavigationBar: AnimatedBottomNavigationBar(
-            icons: iconList,
-            activeIndex: _bottomNavIndex,
-            gapLocation: GapLocation.none,
-            notchSmoothness: NotchSmoothness.verySmoothEdge,
-            backgroundColor: Colors.red.shade700,
-            activeColor: Colors.white,
-            inactiveColor: Colors.white70,
-            onTap: (index) {
-              setState(() {
-                _bottomNavIndex = index;
-              });
 
-              // Trigger same AppBar actions
-              actions[index]();
-            },
-          ),
-      );
+                const SizedBox(height: 20),
+
+                // Bottom section: Quick info
+                Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    children: [
+                      // Responders status
+                      Consumer<ResponderProvider>(
+                        builder: (context, responderProvider, _) {
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.purple.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.purple),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      settings.t('total_responders'),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelLarge,
+                                    ),
+                                    Text(
+                                      responderProvider.responders.length
+                                          .toString(),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineSmall,
+                                    ),
+                                  ],
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      settings.t('nearby_5km'),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelLarge,
+                                    ),
+                                    Text(
+                                      responderProvider.nearbyResponders.length
+                                          .toString(),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineSmall
+                                          ?.copyWith(
+                                            color: Colors.purple,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ]))),
+      bottomNavigationBar: AnimatedBottomNavigationBar(
+        icons: iconList,
+        activeIndex: _bottomNavIndex,
+        gapLocation: GapLocation.none,
+        notchSmoothness: NotchSmoothness.verySmoothEdge,
+        backgroundColor: Colors.red.shade700,
+        activeColor: Colors.white,
+        inactiveColor: Colors.white70,
+        onTap: (index) {
+          setState(() {
+            _bottomNavIndex = index;
+          });
+
+          // Trigger same AppBar actions
+          actions[index]();
+        },
+      ),
+    );
   }
 }
 
@@ -2434,7 +2472,7 @@ Widget _actionCard({
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.red.withOpacity(0.1),
+            color: Colors.red.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 4),
           )
@@ -2509,48 +2547,10 @@ class DashedBorderPainter extends CustomPainter {
   bool shouldRepaint(CustomPainter oldDelegate) => false;
 }
 
-Widget _styledButton({
-  required String label,
-  required IconData icon,
-  required VoidCallback onPressed,
-}) {
-  return OutlinedButton.icon(
-    onPressed: onPressed,
-    icon: Icon(icon, size: 20),
-    label: Text(label),
-    style: OutlinedButton.styleFrom(
-      padding: const EdgeInsets.all(8),
-      
-      // Rounded modern shape
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-
-      // Border style
-      side: BorderSide(
-        color: Colors.red.shade400,
-        width: 1.5,
-      ),
-
-      // Background (light red)
-      backgroundColor: Colors.red.shade50,
-
-      // Text & icon color
-      foregroundColor: Colors.red.shade700,
-
-      // Subtle elevation feel
-      shadowColor: Colors.red.withOpacity(0.2),
-      elevation: 2,
-    ),
-  );
-}
-
-
 Widget _actionChip({
   required String label,
   required VoidCallback onTap,
 }) {
-
   return GestureDetector(
     onTap: onTap,
     child: Container(
@@ -2581,7 +2581,7 @@ Widget _buildSwitchCard({
     padding: const EdgeInsets.only(bottom: 10),
     child: Container(
       decoration: BoxDecoration(
-        color: value ? Colors.red.withOpacity(0.08) : Colors.grey.shade100,
+        color: value ? Colors.red.withValues(alpha: 0.08) : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: value ? Colors.red : Colors.transparent,
@@ -2593,7 +2593,7 @@ Widget _buildSwitchCard({
         title: Text(title),
         subtitle: subtitle != null ? Text(subtitle) : null,
         secondary: Icon(icon, color: Colors.red),
-        activeColor: Colors.red,
+        activeThumbColor: Colors.red,
       ),
     ),
   );
@@ -2610,7 +2610,7 @@ Widget _buildCommsSwitch({
     padding: const EdgeInsets.only(bottom: 10),
     child: Container(
       decoration: BoxDecoration(
-        color: value ? Colors.red.withOpacity(0.08) : Colors.grey.shade100,
+        color: value ? Colors.red.withValues(alpha: 0.08) : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: value ? Colors.red : Colors.transparent,
@@ -2622,7 +2622,7 @@ Widget _buildCommsSwitch({
         title: Text(title),
         subtitle: subtitle != null ? Text(subtitle) : null,
         secondary: Icon(icon, color: Colors.red),
-        activeColor: Colors.red,
+        activeThumbColor: Colors.red,
       ),
     ),
   );

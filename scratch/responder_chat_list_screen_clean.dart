@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../services/chat_service.dart';
@@ -34,14 +34,12 @@ class ResponderChatListScreen extends StatefulWidget {
   }
 
   @override
-  State<ResponderChatListScreen> createState() => _ResponderChatListScreenState();
+  State<ResponderChatListScreen> createState() =>
+      _ResponderChatListScreenState();
 }
 
 class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
   late bool _showAllActiveChats;
-  final ChatService _chatService = ChatService();
-  final Set<String> _autoPruneInProgress = <String>{};
-  final Set<String> _leavingSosIds = <String>{};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -153,19 +151,6 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                   );
                 }
 
-                final cancelledDocsForUser = docs.where((doc) {
-                  final data = doc.data();
-                  final status =
-                      ((data['status'] as String?) ?? 'active').toLowerCase();
-                  return status == 'cancelled' &&
-                      _isJoinedByUser(data, widget.currentUserId);
-                }).toList();
-                if (cancelledDocsForUser.isNotEmpty) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _autoRemoveCancelledChats(cancelledDocsForUser);
-                  });
-                }
-
                 final sortedDocs = docs.toList()
                   ..sort((a, b) {
                     final aData = a.data();
@@ -191,17 +176,11 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                   });
 
                 final filteredDocs = sortedDocs.where((doc) {
-                  final data = doc.data();
-                  final status =
-                      ((data['status'] as String?) ?? 'active').toLowerCase();
-                  if (status == 'cancelled') {
-                    return false;
-                  }
-
                   if (_searchQuery.isEmpty) {
                     return true;
                   }
 
+                  final data = doc.data();
                   final sosId = ((data['sosId'] as String?) ?? doc.id).toLowerCase();
                   final overview = _asMap(data['sosOverview']);
                   final message =
@@ -219,8 +198,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
 
                 final joinedCount = filteredDocs
                     .where(
-                      (doc) =>
-                          _isJoinedByUser(doc.data(), widget.currentUserId),
+                      (doc) => _isJoinedByUser(doc.data(), widget.currentUserId),
                     )
                     .length;
 
@@ -232,7 +210,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            'Showing ${filteredDocs.length} chats • Joined $joinedCount',
+                            'Showing ${filteredDocs.length} chats ΓÇó Joined $joinedCount',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 2),
@@ -246,20 +224,13 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                     Expanded(
                       child: ListView.separated(
                         itemCount: filteredDocs.length,
-                        separatorBuilder: (_, __) => Divider(
-                          height: 1,
-                          color: Colors.grey.shade300,
-                        ),
+                        separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final doc = filteredDocs[index];
                           final data = doc.data();
 
                           final sosId = (data['sosId'] as String?) ?? doc.id;
                           final overview = _asMap(data['sosOverview']);
-                          final chatTitle = _humanFriendlyChatTitle(
-                            data: data,
-                            sosId: sosId,
-                          );
                           final message = _safeText(
                             overview['message'] as String?,
                             fallback: 'No SOS message available',
@@ -274,64 +245,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                           );
 
                           return ListTile(
-                            dense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            title: Row(
-                              children: <Widget>[
-                                Expanded(
-                                  child: Text(
-                                    chatTitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: <Widget>[
-                                    Icon(
-                                      Icons.circle,
-                                      size: 10,
-                                      color: Colors.green.shade700,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '$onlineCount',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.green.shade700,
-                                          ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Icon(
-                                      Icons.group,
-                                      size: 10,
-                                      color: Colors.redAccent.shade700,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '$participantCount',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.redAccent.shade700,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                            title: Text('SOS: $sosId'),
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: <Widget>[
@@ -341,41 +255,43 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: <Widget>[
-                                    Expanded(
-                                      child: Text(
-                                        'Case ID: $sosId',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style:
-                                            Theme.of(context).textTheme.bodySmall,
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Participants: $participantCount ΓÇó Online responders: $onlineCount ΓÇó Status: $status ΓÇó Joined: ${isJoinedByMe ? 'Yes' : 'No'}',
+                                ),
+                                const SizedBox(height: 6),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: status == 'active'
+                                          ? Colors.green.shade50
+                                          : Colors.red.shade50,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: status == 'active'
+                                            ? Colors.green.shade300
+                                            : Colors.red.shade300,
                                       ),
                                     ),
-                                    Text(
-                                      _timeText(_createdAt(data)),
+                                    child: Text(
+                                      status.toUpperCase(),
                                       style: Theme.of(context)
                                           .textTheme
-                                          .bodySmall,
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: status == 'active'
+                                                ? Colors.green.shade800
+                                                : Colors.red.shade800,
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                     ),
-                                  ],
-                                ),
-                                if (status != 'active') ...<Widget>[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    status.toUpperCase(),
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                          color: status == 'active'
-                                              ? Colors.green.shade800
-                                              : Colors.red.shade800,
-                                        ),
                                   ),
-                                ],
+                                ),
                               ],
                             ),
                             trailing: Row(
@@ -385,9 +301,10 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                                   Icon(
                                     Icons.check_circle,
                                     size: 18,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
+                                    color: Theme.of(context).colorScheme.primary,
                                   ),
+                                const SizedBox(width: 6),
+                                const Icon(Icons.chevron_right),
                               ],
                             ),
                             onTap: () {
@@ -415,96 +332,6 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
         ],
       ),
     );
-  }
-
-  Future<void> _autoRemoveCancelledChats(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-  ) async {
-    for (final doc in docs) {
-      final data = doc.data();
-      final sosId = ((data['sosId'] as String?) ?? doc.id).trim();
-      if (sosId.isEmpty || _autoPruneInProgress.contains(sosId)) {
-        continue;
-      }
-
-      _autoPruneInProgress.add(sosId);
-      try {
-        await _chatService.removeResponderFromChatList(
-          sosId: sosId,
-          responderUid: widget.currentUserId,
-        );
-      } catch (_) {
-        // Ignore transient errors; next snapshot can retry.
-      } finally {
-        _autoPruneInProgress.remove(sosId);
-      }
-    }
-  }
-
-  Future<void> _confirmLeaveActiveConversation({
-    required String sosId,
-    required bool isJoinedByMe,
-  }) async {
-    if (!isJoinedByMe || _leavingSosIds.contains(sosId)) {
-      return;
-    }
-
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Leave this conversation?'),
-            content: const Text(
-              'This only removes the chat from your list. The SOS chat remains in the database for other participants.',
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Leave'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-
-    if (!confirmed || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _leavingSosIds.add(sosId);
-    });
-
-    try {
-      await _chatService.removeResponderFromChatList(
-        sosId: sosId,
-        responderUid: widget.currentUserId,
-      );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Conversation removed from your list.')),
-      );
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to leave right now. Please retry.'),
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _leavingSosIds.remove(sosId);
-        });
-      }
-    }
   }
 
   static Map<String, dynamic> _asMap(dynamic raw) {
@@ -576,70 +403,5 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
       return base;
     }
     return '${base.substring(0, maxLen)}...';
-  }
-
-  static String _humanFriendlyChatTitle({
-    required Map<String, dynamic> data,
-    required String sosId,
-  }) {
-    final overview = _asMap(data['sosOverview']);
-
-    final customTitle = (overview['title'] as String?)?.trim();
-    if (customTitle != null && customTitle.isNotEmpty) {
-      return customTitle;
-    }
-
-    final crisisType = ((overview['crisisType'] as String?) ??
-            (data['crisisType'] as String?) ??
-            '')
-        .trim();
-
-    final participants = data['participants'];
-    if (participants is List) {
-      for (final entry in participants.whereType<Map>()) {
-        final role = ((entry['role'] as String?) ?? '').toLowerCase();
-        final displayName = (entry['displayName'] as String?)?.trim() ?? '';
-        if (role == 'victim' && displayName.isNotEmpty) {
-          if (displayName.toLowerCase() == 'victim') {
-            break;
-          }
-          return crisisType.isNotEmpty
-              ? '${_toTitleCase(crisisType)}: $displayName'
-              : 'Emergency: $displayName';
-        }
-      }
-    }
-
-    if (crisisType.isNotEmpty) {
-      return '${_toTitleCase(crisisType)} emergency';
-    }
-
-    return 'Emergency chat ${sosId.length >= 6 ? sosId.substring(0, 6) : sosId}';
-  }
-
-  static String _toTitleCase(String input) {
-    final words = input
-        .split(RegExp(r'\s+'))
-        .where((word) => word.trim().isNotEmpty)
-        .toList();
-    if (words.isEmpty) {
-      return input;
-    }
-
-    return words
-        .map(
-          (word) =>
-              '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}',
-        )
-        .join(' ');
-  }
-
-  static String _timeText(DateTime value) {
-    final local = value.toLocal();
-    final time =
-        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-    final date =
-        '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}';
-    return '$time • $date';
   }
 }
