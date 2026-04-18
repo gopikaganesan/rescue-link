@@ -3,13 +3,64 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/services/media_upload_service.dart';
+import '../core/utils/chat_message_utils.dart';
 import '../services/chat_service.dart';
+import '../core/models/responder_model.dart';
+import 'responder_profile_screen.dart';
+
+class AIHighlightingController extends TextEditingController {
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    if (text.isEmpty) {
+      return const TextSpan();
+    }
+
+    final children = <TextSpan>[];
+    final regex = RegExp(r'@ai\b', caseSensitive: false);
+    int lastIndex = 0;
+
+    for (final match in regex.allMatches(text)) {
+      if (match.start > lastIndex) {
+        children.add(TextSpan(
+          text: text.substring(lastIndex, match.start),
+          style: style,
+        ));
+      }
+      children.add(TextSpan(
+        text: match.group(0),
+        style: style?.copyWith(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.bold,
+            ) ??
+            const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+      ));
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < text.length) {
+      children.add(TextSpan(
+        text: text.substring(lastIndex),
+        style: style,
+      ));
+    }
+
+    return TextSpan(style: style, children: children);
+  }
+}
 
 class GroupChatScreen extends StatefulWidget {
   const GroupChatScreen({
@@ -32,18 +83,19 @@ class GroupChatScreen extends StatefulWidget {
 }
 
 class _GroupChatScreenState extends State<GroupChatScreen>
-    with WidgetsBindingObserver {
-  static const int _maxMessageLength = 1000;
-
+  with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final ChatService _chatService = ChatService();
   final MediaUploadService _mediaUploadService =
       MediaUploadService.fromEnvironment();
+  final AIHighlightingController _controller = AIHighlightingController();
   final ImagePicker _imagePicker = ImagePicker();
   final SpeechToText _speechToText = SpeechToText();
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPreviewPlayer = AudioPlayer();
   final AudioPlayer _chatAudioPlayer = AudioPlayer();
-  final TextEditingController _controller = TextEditingController();
+  final FlutterTts _flutterTts = FlutterTts();
+  late final AnimationController _typingDotsController;
+  static const int _maxMessageLength = 1000;
   bool _isSending = false;
   bool _isJoining = false;
   bool _isRepairing = false;
@@ -56,6 +108,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   bool _autoRepairEnabled = false;
   String? _setupStatusText;
   bool _viewOverviewOnly = false;
+  bool _showFullOverview = false;
   bool _presenceOnline = false;
   bool _presenceTargetOnline = false;
   bool _isAskingAi = false;
@@ -66,19 +119,30 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   XFile? _selectedImageAttachment;
   String? _voiceAudioPath;
   String? _playingChatAudioUrl;
+  String? _speakingMessageId;
   Duration _chatAudioPosition = Duration.zero;
   Duration _chatAudioDuration = Duration.zero;
   StreamSubscription<Duration>? _chatAudioPositionSub;
   StreamSubscription<Duration>? _chatAudioDurationSub;
   StreamSubscription<void>? _chatAudioCompleteSub;
+  Map<String, dynamic>? _sosRequestData;
+  List<String> _detectedNumbersInDraft = [];
 
   bool get _isResponder => widget.currentUserRole == 'responder';
+  bool get _canManageResponders => widget.currentUserRole == 'victim';
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _typingDotsController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
     _initializeSpeech();
+    _configureTextToSpeech();
+    _loadMasterSosData();
+    _controller.addListener(_onComposeTextChange);
     _chatAudioPositionSub = _chatAudioPlayer.onPositionChanged.listen((value) {
       if (!mounted) {
         return;
@@ -106,6 +170,32 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     });
   }
 
+  Future<void> _loadMasterSosData() async {
+    final requestData = await _chatService.fetchEmergencyRequest(widget.sosId);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _sosRequestData = requestData;
+    });
+  }
+
+  void _onComposeTextChange() {
+    final detectedNumbers = _extractPhoneNumbers(_controller.text);
+    if (_detectedNumbersInDraft.length == detectedNumbers.length &&
+        _detectedNumbersInDraft.every(detectedNumbers.contains)) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _detectedNumbersInDraft = detectedNumbers;
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_presenceOnline) {
@@ -127,11 +217,13 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _typingDotsController.dispose();
     _autoRepairTimer?.cancel();
     _clearPresenceOnDispose();
     _speechToText.stop();
     _audioRecorder.dispose();
     _audioPreviewPlayer.dispose();
+    _flutterTts.stop();
     _chatAudioPositionSub?.cancel();
     _chatAudioDurationSub?.cancel();
     _chatAudioCompleteSub?.cancel();
@@ -141,7 +233,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   Future<void> _send() async {
-    if (_isSending || _isAskingAi) {
+    if (_isSending) {
       return;
     }
 
@@ -158,8 +250,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
     try {
       final uploadedAttachment = await _uploadAttachmentIfNeeded();
-      final attachmentUrl = uploadedAttachment?['url'] as String?;
-      final attachmentType = uploadedAttachment?['type'] as String?;
+      final attachmentUrl = uploadedAttachment?['url'];
+      final attachmentType = uploadedAttachment?['type'];
 
       final effectiveText = text.isEmpty &&
               _pendingVoiceTranscript != null &&
@@ -182,6 +274,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         voiceAudioType: attachmentType == 'audio/wav' ? 'audio/wav' : null,
         voiceTranscript: _pendingVoiceTranscript,
       );
+      HapticFeedback.lightImpact();
 
       if (shouldAskAiFromMention) {
         final aiSent = await _requestAiReplySafely(
@@ -270,7 +363,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   Future<void> _pickImageAttachment() async {
-    if (_isSending || _isAskingAi) {
+    if (_isSending) {
       return;
     }
 
@@ -299,7 +392,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   Future<void> _pickCameraAttachment() async {
-    if (_isSending || _isAskingAi) {
+    if (_isSending) {
       return;
     }
 
@@ -329,7 +422,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   Future<void> _toggleVoiceTranscription() async {
-    if (_isSending || _isAskingAi) {
+    if (_isSending) {
       return;
     }
 
@@ -388,7 +481,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   Future<void> _toggleVoiceRecording() async {
-    if (_isSending || _isAskingAi) {
+    if (_isSending) {
       return;
     }
 
@@ -475,69 +568,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     });
   }
 
-  Future<void> _showAttachmentOptions() async {
-    if (_isSending || _isAskingAi) {
-      return;
-    }
-
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Photo from gallery'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _pickImageAttachment();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.camera_alt_outlined),
-                title: const Text('Photo from camera'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _pickCameraAttachment();
-                },
-              ),
-              ListTile(
-                leading: Icon(
-                  _isRecordingClip ? Icons.stop_circle_outlined : Icons.mic,
-                ),
-                title: Text(
-                  _isRecordingClip
-                      ? 'Stop recording audio'
-                      : 'Record audio clip',
-                ),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _toggleVoiceRecording();
-                },
-              ),
-              ListTile(
-                leading: Icon(
-                  _isTranscribing ? Icons.hearing_disabled : Icons.hearing,
-                ),
-                title: Text(
-                  _isTranscribing
-                      ? 'Stop voice transcription'
-                      : 'Start voice transcription',
-                ),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _toggleVoiceTranscription();
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   Future<void> _askAiFromComposer() async {
     if (_isAskingAi || _isSending) {
       return;
@@ -545,7 +575,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
     final prompt = _controller.text.trim();
     final effectivePrompt = prompt.isEmpty
-        ? 'Provide immediate safety guidance based on recent chat context.'
+        ? 'Analyze the current emergency chat context. Generate content for possible scenarios that could evolve from this, and provide actionable step-by-step maps/protocols according to each scenario.'
         : prompt;
 
     setState(() {
@@ -640,66 +670,143 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('RescueLink Group Chat'),
-        actions: <Widget>[
-          _buildChatActionsMenu(),
-        ],
-      ),
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: _chatService.watchChat(widget.sosId),
-        builder: (context, chatSnapshot) {
-          final chatLoaded = chatSnapshot.hasData;
-          final chatData = chatSnapshot.data?.data() ?? <String, dynamic>{};
-          final overview = _asMap(chatData['sosOverview']);
-          final overviewMessage =
-              (overview['message'] as String?) ?? 'No SOS message available';
-          final overviewMedia = _asMediaList(overview['media']);
-          final status = (chatData['status'] as String?) ?? 'active';
-          final responderOnlineCount = _resolveResponderOnlineCount(chatData);
-          final participants = _asMapList(chatData['participants']);
-          final participantUids = _resolveParticipantUids(
-            chatData: chatData,
-            participants: participants,
-          );
-          final isResponder = _isResponder;
-          final hasJoined = participants.any(
-              (entry) => (entry['uid'] as String?) == widget.currentUserId);
-          final showJoinGate =
-              widget.enableResponderJoinGate && isResponder && !hasJoined;
-          final canSendInChat = status != 'cancelled' &&
-              participantUids.contains(widget.currentUserId);
-          final shouldAutoRepair =
-              !canSendInChat && status != 'cancelled' && !showJoinGate;
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _chatService.watchChat(widget.sosId),
+      builder: (context, chatSnapshot) {
+        final chatLoaded = chatSnapshot.hasData;
+        final chatData = chatSnapshot.data?.data() ?? <String, dynamic>{};
+        final overview = _asMap(chatData['sosOverview']);
+        final overviewMessage =
+            (overview['message'] as String?) ?? 'No SOS message available';
+        final overviewMedia = _asMediaList(overview['media']);
+        // Master fallback from the SOS master record if chat data is incomplete
+        final masterLat = _asDouble(_sosRequestData?['latitude']) ??
+            _asDouble(_sosRequestData?['victimLatitude']) ??
+            _asDouble(_sosRequestData?['requesterLatitude']) ??
+            _asDouble(
+                (_sosRequestData?['victimLocation'] as Map?)?['latitude']);
+        final masterLng = _asDouble(_sosRequestData?['longitude']) ??
+            _asDouble(_sosRequestData?['victimLongitude']) ??
+            _asDouble(_sosRequestData?['requesterLongitude']) ??
+            _asDouble(
+                (_sosRequestData?['victimLocation'] as Map?)?['longitude']);
+        final masterAddress = (_sosRequestData?['address'] as String?) ??
+            (_sosRequestData?['victimAddress'] as String?) ??
+            (_sosRequestData?['requesterAddress'] as String?);
 
-          _tryAutoAiAssist(chatLoaded: chatLoaded, status: status);
+        final overviewWithLocation = <String, dynamic>{
+          ...overview,
+          if (!overview.containsKey('latitude'))
+            'latitude': _asDouble(chatData['latitude']) ??
+                _asDouble(chatData['victimLatitude']) ??
+                _asDouble(chatData['requesterLatitude']) ??
+                _asDouble((chatData['victimLocation'] as Map?)?['latitude']) ??
+                (chatData['location'] is GeoPoint
+                    ? (chatData['location'] as GeoPoint).latitude
+                    : null) ??
+                masterLat,
+          if (!overview.containsKey('longitude'))
+            'longitude': _asDouble(chatData['longitude']) ??
+                _asDouble(chatData['victimLongitude']) ??
+                _asDouble(chatData['requesterLongitude']) ??
+                _asDouble((chatData['victimLocation'] as Map?)?['longitude']) ??
+                (chatData['location'] is GeoPoint
+                    ? (chatData['location'] as GeoPoint).longitude
+                    : null) ??
+                masterLng,
+          if (!overview.containsKey('address'))
+            'address': (overview['address'] as String?)?.isNotEmpty == true
+                ? overview['address']
+                : (chatData['address'] ??
+                    chatData['victimAddress'] ??
+                    chatData['requesterAddress'] ??
+                    masterAddress),
+        };
+        final status = (chatData['status'] as String?) ?? 'active';
+        final responderOnlineCount = _resolveResponderOnlineCount(chatData);
+        final participants = _asMapList(chatData['participants']);
+        final notificationPreferences =
+          _asMap(chatData['notificationPreferences']);
+        final chatNotificationsEnabled =
+          notificationPreferences[widget.currentUserId] != false;
+        final participantUids = _resolveParticipantUids(
+          chatData: chatData,
+          participants: participants,
+        );
+        final blockedUids =
+            (chatData['blockedUids'] as List<dynamic>?)?.cast<String>() ??
+                <String>[];
+        final joinRequests = (chatData['joinRequests'] as List<dynamic>?)
+                ?.cast<Map<String, dynamic>>() ??
+            <Map<String, dynamic>>[];
+        final isResponder = _isResponder;
+        final hasJoined = participants
+            .any((entry) => (entry['uid'] as String?) == widget.currentUserId);
+        final showJoinGate =
+            widget.enableResponderJoinGate && isResponder && !hasJoined;
+        final canSendInChat = status != 'cancelled' &&
+            participantUids.contains(widget.currentUserId);
+        final shouldAutoRepair =
+            !canSendInChat && status != 'cancelled' && !showJoinGate;
 
-          _syncAutoRepairState(
-            shouldAutoRepair: shouldAutoRepair,
-            overviewMessage: overviewMessage,
-            overviewMedia: overviewMedia,
-          );
+        _tryAutoAiAssist(chatLoaded: chatLoaded, status: status);
 
-          final shouldBeOnline =
-              status != 'cancelled' && !showJoinGate && hasJoined;
-          _queuePresenceUpdate(shouldBeOnline);
+        _syncAutoRepairState(
+          shouldAutoRepair: shouldAutoRepair,
+          overviewMessage: overviewMessage,
+          overviewMedia: overviewMedia,
+        );
 
-          return Column(
-            children: <Widget>[
-              _buildHeader(
-                context,
-                responderOnlineCount: responderOnlineCount,
+        final shouldBeOnline =
+            status != 'cancelled' && !showJoinGate && hasJoined;
+        _queuePresenceUpdate(shouldBeOnline);
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('RescueLink Group Chat',
+                    style: TextStyle(fontSize: 16)),
+                Row(
+                  children: [
+                    const Icon(Icons.circle, size: 10, color: Colors.green),
+                    const SizedBox(width: 4),
+                    Text('$responderOnlineCount Online',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.normal,
+                            color: Colors.green)),
+                    const SizedBox(width: 12),
+                    _buildAiStatusBadge(chatData),
+                  ],
+                ),
+              ],
+            ),
+            actions: <Widget>[
+              _buildChatActionsMenu(
+                participants,
+                chatNotificationsEnabled: chatNotificationsEnabled,
               ),
+            ],
+          ),
+          body: Column(
+            children: <Widget>[
               _buildOverviewCard(
                 context,
                 message: overviewMessage,
                 media: overviewMedia,
+                overview: overviewWithLocation,
               ),
+              if (_canManageResponders &&
+                  joinRequests.any((r) => r['status'] == 'pending'))
+                _buildJoinRequestsHeader(joinRequests),
               if (showJoinGate)
                 _buildJoinSection(
                   context,
                   participants: participants,
+                  blockedUids: blockedUids,
+                  joinRequests: joinRequests,
                   isCancelled: status == 'cancelled',
                 ),
               if (status == 'cancelled')
@@ -785,6 +892,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                           final hasAudioAttachment = chatAudioUrl.isNotEmpty &&
                               (attachmentType.contains('audio') ||
                                   voiceAudioUrl.isNotEmpty);
+                          final docId = docs[index].id;
                           final isMine = senderUid == widget.currentUserId;
 
                           final rawCreatedAt = data['createdAt'];
@@ -793,78 +901,290 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                             createdAt = rawCreatedAt.toDate();
                           }
 
-                          return Align(
-                            alignment: isMine
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(vertical: 5),
-                              padding: const EdgeInsets.all(10),
-                              constraints: const BoxConstraints(maxWidth: 320),
-                              decoration: BoxDecoration(
-                                color: isAiMessage
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .tertiaryContainer
-                                    : isMine
-                                        ? Theme.of(context)
+                          final isSystem = data['type'] == 'system' ||
+                              data['isSystem'] == true;
+
+                          if (isSystem) {
+                            return Container(
+                              margin: const EdgeInsets.symmetric(vertical: 8),
+                              alignment: Alignment.center,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Text(
+                                  text,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w500,
+                                        color: Theme.of(context)
                                             .colorScheme
-                                            .primaryContainer
-                                        : Theme.of(context)
-                                            .colorScheme
-                                            .surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(12),
+                                            .onSurfaceVariant,
+                                      ),
+                                ),
                               ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    isAiMessage
-                                        ? '$senderName • AI'
-                                        : senderName,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelMedium
-                                        ?.copyWith(fontWeight: FontWeight.w600),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(text),
-                                  if (hasImageAttachment) ...<Widget>[
-                                    const SizedBox(height: 8),
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(
-                                        attachmentUrl,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Container(
-                                          width: 180,
-                                          height: 120,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .surfaceContainerHighest,
-                                          alignment: Alignment.center,
-                                          child:
-                                              const Text('Image unavailable'),
+                            );
+                          }
+
+                          return Semantics(
+                            container: true,
+                            label: _buildMessageSemanticLabel(
+                              senderName: senderName,
+                              text: text,
+                              isAiMessage: isAiMessage,
+                              createdAt: createdAt,
+                              hasImageAttachment: hasImageAttachment,
+                              hasAudioAttachment: hasAudioAttachment,
+                            ),
+                            child: Align(
+                              alignment: isMine
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (!isMine && !isSystem)
+                                  Padding(
+                                    padding:
+                                        const EdgeInsets.only(right: 8, top: 4),
+                                    child: GestureDetector(
+                                      onTap: () => _showResponderOptions(
+                                        context: context,
+                                        participantData: {
+                                          'uid': senderUid,
+                                          'displayName': senderName,
+                                          'isAi': isAiMessage,
+                                        },
+                                        responderName: senderName,
+                                      ),
+                                      child: CircleAvatar(
+                                        radius: 16,
+                                        backgroundColor: isAiMessage
+                                            ? Colors.purple.shade100
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .primaryContainer,
+                                        child: Text(
+                                          senderName.isNotEmpty
+                                              ? senderName[0].toUpperCase()
+                                              : '?',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: isAiMessage
+                                                ? Colors.purple
+                                                : Theme.of(context)
+                                                    .colorScheme
+                                                    .primary,
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ],
-                                  if (hasAudioAttachment) ...<Widget>[
-                                    const SizedBox(height: 8),
-                                    _buildAudioAttachmentBubble(chatAudioUrl),
-                                  ],
-                                  if (createdAt != null) ...<Widget>[
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      _timeText(createdAt),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall,
+                                  ),
+                                Flexible(
+                                  child: GestureDetector(
+                                    onLongPress: () {
+                                      if (isMine &&
+                                          (hasImageAttachment ||
+                                              hasAudioAttachment)) {
+                                        showDialog(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text('Delete Message'),
+                                            content: const Text(
+                                                'Do you want to delete this message and its media?'),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(context),
+                                                child: const Text('Cancel'),
+                                              ),
+                                              TextButton(
+                                                onPressed: () async {
+                                                  Navigator.pop(context);
+                                                  final deleted = await _chatService
+                                                      .deleteMessageWithMedia(
+                                                    sosId: widget.sosId,
+                                                    messageId: docId,
+                                                    requestedByUid:
+                                                        widget.currentUserId,
+                                                  );
+                                                  if (!mounted) {
+                                                    return;
+                                                  }
+                                                  ScaffoldMessenger.of(this.context)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        deleted
+                                                            ? 'Message and media deleted.'
+                                                            : 'Unable to delete this media message.',
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                                child: const Text('Delete',
+                                                    style: TextStyle(
+                                                        color: Colors.red)),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    child: Container(
+                                      margin: const EdgeInsets.symmetric(
+                                          vertical: 5),
+                                      padding: const EdgeInsets.all(10),
+                                      constraints: BoxConstraints(
+                                        maxWidth:
+                                            MediaQuery.of(context).size.width *
+                                                0.84,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isAiMessage
+                                            ? Colors.red.shade50
+                                            : isMine
+                                                ? Theme.of(context)
+                                                    .colorScheme
+                                                    .primaryContainer
+                                                : Theme.of(context)
+                                                    .colorScheme
+                                                    .surfaceContainerHighest,
+                                        borderRadius: BorderRadius.circular(18),
+                                        border: Border.all(
+                                          color: isAiMessage
+                                              ? Colors.red.shade200
+                                              : isMine
+                                                  ? Theme.of(context)
+                                                      .colorScheme
+                                                      .primary
+                                                      .withValues(alpha: 0.16)
+                                                  : Theme.of(context)
+                                                      .colorScheme
+                                                      .outlineVariant
+                                                      .withValues(alpha: 0.22),
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: <Widget>[
+                                          Text(
+                                            isAiMessage
+                                                ? '$senderName • AI'
+                                                : senderName,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                  color: isAiMessage
+                                                      ? Colors.red.shade900
+                                                      : null,
+                                                ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          AnimatedSize(
+                                            duration: const Duration(milliseconds: 220),
+                                            curve: Curves.easeOutCubic,
+                                            alignment: Alignment.topLeft,
+                                            child: isAiMessage
+                                                ? _buildAiMessageContent(
+                                                    context, text)
+                                                : _buildLinkableText(
+                                                    context, text),
+                                          ),
+                                          if (text.trim().isNotEmpty) ...<Widget>[
+                                            const SizedBox(height: 4),
+                                            Align(
+                                              alignment: Alignment.centerLeft,
+                                              child: Semantics(
+                                                button: true,
+                                                label: _speakingMessageId == docId
+                                                    ? 'Stop reading this message'
+                                                    : 'Listen to this message',
+                                                child: IconButton(
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                  constraints: const BoxConstraints(
+                                                    minWidth: 32,
+                                                    minHeight: 32,
+                                                  ),
+                                                  padding: EdgeInsets.zero,
+                                                  onPressed: () {
+                                                    _toggleMessageReadAloud(
+                                                      messageId: docId,
+                                                      senderName: senderName,
+                                                      text: text,
+                                                    );
+                                                  },
+                                                  icon: Icon(
+                                                    _speakingMessageId == docId
+                                                        ? Icons.stop_circle
+                                                        : Icons.volume_up,
+                                                    size: 18,
+                                                  ),
+                                                  tooltip:
+                                                      _speakingMessageId == docId
+                                                      ? 'Stop listening'
+                                                      : 'Listen',
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          if (hasImageAttachment) ...<Widget>[
+                                            const SizedBox(height: 8),
+                                            ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              child: Image.network(
+                                                attachmentUrl,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, __, ___) =>
+                                                    Container(
+                                                  width: 180,
+                                                  height: 120,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .surfaceContainerHighest,
+                                                  alignment: Alignment.center,
+                                                  child: const Text(
+                                                      'Image unavailable'),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          if (hasAudioAttachment) ...<Widget>[
+                                            const SizedBox(height: 8),
+                                            _buildAudioAttachmentBubble(
+                                                chatAudioUrl),
+                                          ],
+                                          if (createdAt != null) ...<Widget>[
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              _timeText(createdAt),
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelSmall,
+                                            ),
+                                          ],
+                                        ],
+                                      ),
                                     ),
-                                  ],
-                                ],
-                              ),
+                                  ),
+                                ),
+                              ],
+                            ),
                             ),
                           );
                         },
@@ -889,97 +1209,121 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Row(
-                          children: <Widget>[
-                            IconButton(
-                              onPressed:
-                                  canSendInChat ? _showAttachmentOptions : null,
-                              icon: const Icon(Icons.attach_file),
-                              tooltip: 'Attach',
-                            ),
-                            Expanded(
-                              child: TextField(
-                                controller: _controller,
-                                enabled: canSendInChat,
-                                maxLength: _maxMessageLength,
-                                textInputAction: TextInputAction.send,
-                                minLines: 1,
-                                maxLines: 4,
-                                onSubmitted: (_) {
-                                  if (canSendInChat) {
-                                    _send();
-                                  }
-                                },
-                                decoration: const InputDecoration(
-                                  hintText: 'Type a message',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            IconButton(
-                              onPressed:
-                                  !canSendInChat || _isSending || _isAskingAi
-                                      ? null
-                                      : _send,
-                              icon: _isSending
-                                  ? const SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.send),
-                              tooltip: 'Send',
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: <Widget>[
-                            const Spacer(),
-                            TextButton.icon(
-                              onPressed:
-                                  !canSendInChat || _isAskingAi || _isSending
-                                      ? null
-                                      : _askAiFromComposer,
-                              icon: _isAskingAi
-                                  ? const SizedBox(
-                                      height: 14,
-                                      width: 14,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.smart_toy_outlined),
-                              label: const Text('Ask AI'),
-                            ),
-                          ],
-                        ),
-                        if (_selectedImageAttachment != null)
+                        // Ask AI Button (Placed above chat box)
+                        if (canSendInChat)
                           Padding(
-                            padding: const EdgeInsets.only(
-                                top: 8, left: 8, right: 8),
+                            padding: const EdgeInsets.only(bottom: 4),
                             child: Row(
                               children: <Widget>[
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: Image.network(
-                                    Uri.file(_selectedImageAttachment!.path)
-                                        .toString(),
-                                    width: 52,
-                                    height: 52,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => Container(
-                                      width: 52,
-                                      height: 52,
+                                const Spacer(),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary
+                                        .withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
                                       color: Theme.of(context)
                                           .colorScheme
-                                          .surfaceContainerHighest,
-                                      alignment: Alignment.center,
-                                      child:
-                                          const Icon(Icons.image_not_supported),
+                                          .primary
+                                          .withValues(alpha: 0.2),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: TextButton.icon(
+                                    style: TextButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12),
+                                    ),
+                                    onPressed: _isAskingAi || _isSending
+                                        ? null
+                                        : _askAiFromComposer,
+                                    icon: _isAskingAi
+                                      ? _typingDots(context)
+                                        : Icon(
+                                            Icons.volunteer_activism,
+                                            size: 18,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                          ),
+                                    label: Text(
+                                      'Ask AI Assistant',
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        // Real-time Phone Detection Chips
+                        if (_detectedNumbersInDraft.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: _detectedNumbersInDraft
+                                    .map((phoneNumber) => Padding(
+                                          padding:
+                                              const EdgeInsets.only(right: 8),
+                                          child: ActionChip(
+                                            avatar: const Icon(Icons.phone,
+                                                size: 14),
+                                            label: Text('Call $phoneNumber'),
+                                            onPressed: () =>
+                                                _callEmergencyNumber(
+                                                    phoneNumber),
+                                            backgroundColor: Colors.red[50],
+                                            side: BorderSide(
+                                                color: Colors.red
+                                                    .withValues(alpha: 0.2)),
+                                          ),
+                                        ))
+                                    .toList(),
+                              ),
+                            ),
+                          ),
+                        // Attachments Preview (Placed above chat box)
+                        if (_selectedImageAttachment != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: <Widget>[
+                                GestureDetector(
+                                  onTap: () async {
+                                    final uri = Uri.file(
+                                        _selectedImageAttachment!.path);
+                                    if (await canLaunchUrl(uri)) {
+                                      await launchUrl(uri);
+                                    }
+                                  },
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Image.network(
+                                      Uri.file(_selectedImageAttachment!.path)
+                                          .toString(),
+                                      width: 52,
+                                      height: 52,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Container(
+                                        width: 52,
+                                        height: 52,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .surfaceContainerHighest,
+                                        alignment: Alignment.center,
+                                        child: const Icon(
+                                            Icons.image_not_supported),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1006,8 +1350,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                           ),
                         if (_voiceAudioPath != null)
                           Padding(
-                            padding: const EdgeInsets.only(
-                                top: 8, left: 8, right: 8),
+                            padding: const EdgeInsets.only(bottom: 8),
                             child: Row(
                               children: <Widget>[
                                 IconButton(
@@ -1015,7 +1358,9 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                   icon: Icon(
                                     _isPreviewPlaying
                                         ? Icons.stop_circle_outlined
-                                        : Icons.play_circle_outline,
+                                        : Icons.play_circle_fill,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
                                   ),
                                   tooltip: 'Preview voice clip',
                                 ),
@@ -1042,20 +1387,18 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                           ),
                         if (_isRecordingClip)
                           Padding(
-                            padding: const EdgeInsets.only(
-                                top: 8, left: 8, right: 8),
+                            padding: const EdgeInsets.only(bottom: 8),
                             child: Row(
                               children: <Widget>[
                                 const SizedBox(
                                   width: 12,
                                   height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  'Recording audio... tap attach and choose stop.',
+                                  'Recording audio... tap mic again to stop.',
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
@@ -1063,17 +1406,115 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                           ),
                         if (_isTranscribing)
                           Padding(
-                            padding: const EdgeInsets.only(
-                                top: 8, left: 8, right: 8),
+                            padding: const EdgeInsets.only(bottom: 8),
                             child: Text(
-                              'Voice transcription is active.',
+                              'Voice transcription is active...',
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ),
+                        // Chat Input Box
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: <Widget>[
+                            Expanded(
+                              child: TextField(
+                                controller: _controller,
+                                enabled: canSendInChat,
+                                maxLength: _maxMessageLength,
+                                textInputAction: TextInputAction.send,
+                                minLines: 1,
+                                maxLines: 4,
+                                onSubmitted: (_) {
+                                  if (canSendInChat) _send();
+                                },
+                                decoration: InputDecoration(
+                                  hintText: 'Type a message',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 12),
+                                  prefixIcon: IconButton(
+                                    icon: Icon(_isTranscribing
+                                        ? Icons.hearing_disabled
+                                        : Icons.hearing),
+                                    onPressed: canSendInChat
+                                        ? _toggleVoiceTranscription
+                                        : null,
+                                    tooltip: _isTranscribing
+                                        ? 'Stop dictation'
+                                        : 'Start dictation',
+                                  ),
+                                  suffixIcon: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Mic: record audio clip
+                                      IconButton(
+                                        icon: Icon(_isRecordingClip
+                                            ? Icons.stop_circle
+                                            : Icons.mic),
+                                        color: _isRecordingClip
+                                            ? Colors.red
+                                            : null,
+                                        onPressed: canSendInChat
+                                            ? _toggleVoiceRecording
+                                            : null,
+                                        tooltip: _isRecordingClip
+                                            ? 'Stop recording'
+                                            : 'Record audio clip',
+                                      ),
+                                      // Attach: camera / gallery / location
+                                      IconButton(
+                                        icon: const Icon(Icons.attach_file),
+                                        onPressed: canSendInChat
+                                            ? () => _showAttachOptions(context)
+                                            : null,
+                                        tooltip: 'Attach',
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Send button minimized
+                            Container(
+                              margin: const EdgeInsets.only(
+                                  bottom:
+                                      4), // better center alignment with text field
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: canSendInChat
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.grey,
+                              ),
+                              child: IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 40, minHeight: 40),
+                                icon: _isSending
+                                    ? const SizedBox(
+                                        height: 18,
+                                        width: 18,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white),
+                                      )
+                                    : const Icon(Icons.send,
+                                        size: 20, color: Colors.white),
+                                onPressed:
+                                    !canSendInChat || _isSending || _isAskingAi
+                                        ? null
+                                        : _send,
+                                tooltip: 'Send',
+                              ),
+                            ),
+                          ],
+                        ),
                         if (!canSendInChat && status != 'cancelled')
                           Padding(
                             padding: const EdgeInsets.only(
-                                top: 4, left: 8, right: 8),
+                                top: 8, left: 8, right: 8),
                             child: Row(
                               children: <Widget>[
                                 Expanded(
@@ -1099,8 +1540,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                           width: 14,
                                           height: 14,
                                           child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
+                                              strokeWidth: 2),
                                         )
                                       : const Text('Retry Setup'),
                                 ),
@@ -1112,17 +1552,101 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                   ),
                 ),
             ],
-          );
-        },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildJoinRequestsHeader(List<Map<String, dynamic>> requests) {
+    final pending = requests.where((r) => r['status'] == 'pending').toList();
+    if (pending.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context)
+            .colorScheme
+            .primaryContainer
+            .withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color:
+                Theme.of(context).colorScheme.primary.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Pending Join Requests',
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          ...pending.map((req) {
+            final uid = req['uid'] as String;
+            final name = req['displayName'] as String;
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: CircleAvatar(child: Text(name[0].toUpperCase())),
+              title: Text(name),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    onPressed: () => _handleJoinRequest(uid, name, 'rejected'),
+                    child: const Text('Reject',
+                        style: TextStyle(color: Colors.red)),
+                  ),
+                  FilledButton(
+                    onPressed: () => _handleJoinRequest(uid, name, 'approved'),
+                    child: const Text('Approve'),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
       ),
     );
+  }
+
+  Future<void> _handleJoinRequest(
+      String uid, String name, String status) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      // Check if widget is still mounted before using context
+      if (!mounted) return;
+
+      await _chatService.resolveJoinRequest(
+        sosId: widget.sosId,
+        request: {'uid': uid, 'displayName': name},
+        approved: status == 'approved',
+      );
+      messenger
+          .showSnackBar(SnackBar(content: Text('Request $status for $name')));
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
   }
 
   Widget _buildJoinSection(
     BuildContext context, {
     required List<Map<String, dynamic>> participants,
+    required List<String> blockedUids,
+    required List<Map<String, dynamic>> joinRequests,
     required bool isCancelled,
   }) {
+    final isBlocked = blockedUids.contains(widget.currentUserId);
+    final requestStatus = _latestJoinRequestStatus(
+      joinRequests: joinRequests,
+      uid: widget.currentUserId,
+    );
+
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
       child: Padding(
@@ -1153,33 +1677,64 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                   );
                   final label =
                       entry['isAi'] == true ? 'RescueLink AI' : displayName;
-                  return Chip(label: Text('$label ($role)'));
+                  return ActionChip(
+                    label: Text('$label ($role)'),
+                    onPressed: entry['isAi'] == true
+                        ? null
+                        : () => _showResponderProfile(uid),
+                    backgroundColor:
+                        uid == widget.currentUserId ? Colors.red.shade50 : null,
+                  );
                 }).toList(),
               ),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 ElevatedButton(
-                  onPressed:
-                      _isJoining || isCancelled ? null : _joinConversation,
+                  onPressed: _isJoining ||
+                          isCancelled ||
+                          requestStatus == 'pending' ||
+                          requestStatus == 'rejected'
+                      ? null
+                      : () {
+                          if (isBlocked) {
+                            _requestApproval();
+                          } else {
+                            _joinConversation();
+                          }
+                        },
                   child: _isJoining
                       ? const SizedBox(
                           width: 16,
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Join Conversation'),
+                      : Text(
+                          requestStatus == 'pending'
+                              ? 'Request Pending'
+                              : requestStatus == 'rejected'
+                                  ? 'Permanently Blocked'
+                                  : isBlocked
+                                      ? 'Request to Join'
+                                      : 'Join Conversation',
+                        ),
                 ),
-                const SizedBox(width: 10),
                 OutlinedButton(
                   onPressed: isCancelled
                       ? null
                       : () {
                           setState(() {
-                            _viewOverviewOnly = true;
+                            _viewOverviewOnly = !_viewOverviewOnly;
                           });
                         },
-                  child: const Text('View Overview Only'),
+                  child: Text(
+                    _viewOverviewOnly
+                        ? 'View Chat Preview'
+                        : 'View Overview Only',
+                  ),
                 ),
               ],
             ),
@@ -1189,19 +1744,150 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     );
   }
 
+  String? _latestJoinRequestStatus({
+    required List<Map<String, dynamic>> joinRequests,
+    required String uid,
+  }) {
+    if (uid.trim().isEmpty) {
+      return null;
+    }
+
+    final mine = joinRequests
+        .where((request) => (request['uid'] as String?) == uid)
+        .toList();
+    if (mine.isEmpty) {
+      return null;
+    }
+
+    int millisForRequest(Map<String, dynamic> request) {
+      final preferred = request['requestedAt'] ??
+          request['resolvedAt'] ??
+          request['updatedAt'];
+      if (preferred is Timestamp) {
+        return preferred.millisecondsSinceEpoch;
+      }
+      return 0;
+    }
+
+    mine.sort((a, b) => millisForRequest(a).compareTo(millisForRequest(b)));
+    return mine.last['status'] as String?;
+  }
+
+  Future<void> _requestApproval() async {
+    setState(() => _isJoining = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _chatService.requestJoinApproval(
+        sosId: widget.sosId,
+        responderUid: widget.currentUserId,
+        responderName: widget.currentUserName,
+      );
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Join request sent to victim.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Failed to request: $e')));
+    } finally {
+      if (mounted) setState(() => _isJoining = false);
+    }
+  }
+
+  Future<void> _showResponderProfile(String uid) async {
+    if (uid.isEmpty || uid == 'unknown') return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    try {
+      // Show loading indicator
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Fetching responder profile...'),
+          duration: Duration(milliseconds: 500),
+        ),
+      );
+
+      // Fetch responder document
+      final snapshot = await FirebaseFirestore.instance
+          .collection('responders')
+          .doc(uid)
+          .get();
+
+      if (!snapshot.exists) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Responder profile not found.')),
+        );
+        return;
+      }
+
+      final data = snapshot.data()!;
+      data['id'] = snapshot.id; // Ensure ID is present
+      final responderModel = ResponderModel.fromMap(data);
+
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => ResponderProfileScreen(
+            responder: responderModel,
+            currentUserId: widget.currentUserId,
+            currentUserName: widget.currentUserName,
+            isCurrentUserProfile: uid == widget.currentUserId,
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to load profile: $e')),
+      );
+    }
+  }
+
   Future<void> _joinConversation() async {
     setState(() {
       _isJoining = true;
       _viewOverviewOnly = false;
     });
 
+    final messenger = ScaffoldMessenger.of(context);
+
     try {
+      // 1. Join Chat (Participant List)
       await _chatService.joinResponder(
         sosId: widget.sosId,
         responderUid: widget.currentUserId,
         responderName: widget.currentUserName,
       );
-      await _updateResponderPresence(true);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _viewOverviewOnly = false;
+      });
+
+      // 2. Presence (Online Status)
+      try {
+        if (!mounted) {
+          return;
+        }
+        await _updateResponderPresence(true);
+      } catch (presErr) {
+        debugPrint('Presence error: $presErr');
+      }
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Unable to join chat: $e'),
+          backgroundColor: Colors.red.shade800,
+          action: SnackBarAction(
+            label: 'Retry',
+            textColor: Colors.white,
+            onPressed: _joinConversation,
+          ),
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -1211,7 +1897,10 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     }
   }
 
-  Widget _buildChatActionsMenu() {
+  Widget _buildChatActionsMenu(
+    List<Map<String, dynamic>> contextParticipants, {
+    required bool chatNotificationsEnabled,
+  }) {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _chatService.watchChat(widget.sosId),
       builder: (context, snapshot) {
@@ -1228,23 +1917,48 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             widget.currentUserRole == 'victim' && hasJoined;
         final canLeaveForResponder =
             _isResponder && hasJoined && status != 'cancelled';
+        final canShowNotificationToggle = hasJoined;
 
-        if (!canDeleteForVictim && !canLeaveForResponder) {
+        if (!canDeleteForVictim &&
+            !canLeaveForResponder &&
+          !canShowNotificationToggle &&
+            contextParticipants.isEmpty) {
           return const SizedBox.shrink();
         }
 
         return PopupMenuButton<String>(
           tooltip: 'Chat actions',
           onSelected: (value) {
+            if (value == 'view_responders') {
+              _showRespondersList(context, contextParticipants);
+              return;
+            }
             if (value == 'delete_chat') {
               _confirmDeleteChatForVictim();
               return;
             }
             if (value == 'leave_chat') {
               _confirmLeaveResponderChat();
+              return;
+            }
+            if (value == 'toggle_notifications') {
+              _toggleChatNotifications(!chatNotificationsEnabled);
             }
           },
           itemBuilder: (context) => <PopupMenuEntry<String>>[
+            const PopupMenuItem<String>(
+              value: 'view_responders',
+              child: Text('View Responders'),
+            ),
+            if (canShowNotificationToggle)
+              PopupMenuItem<String>(
+                value: 'toggle_notifications',
+                child: Text(
+                  chatNotificationsEnabled
+                      ? 'Disable chat notifications'
+                      : 'Enable chat notifications',
+                ),
+              ),
             if (canDeleteForVictim)
               const PopupMenuItem<String>(
                 value: 'delete_chat',
@@ -1256,6 +1970,124 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                 child: Text('Leave Chat (Responder)'),
               ),
           ],
+        );
+      },
+    );
+  }
+
+  void _showRespondersList(
+      BuildContext context, List<Map<String, dynamic>> participants) {
+    final responders =
+        participants.where((p) => p['role'] == 'responder').toList();
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Active Responders (${responders.length})',
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              if (responders.isEmpty)
+                const Text('No responders have joined yet.')
+              else
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: responders.length,
+                    itemBuilder: (context, index) {
+                      final p = responders[index];
+                      final responderUid = (p['uid'] as String?) ?? '';
+                      final isAi = (p['isAi'] as bool?) ?? false;
+                      final name = _uiDisplayName(p['displayName'] as String?,
+                          fallback: 'Responder');
+                      return ListTile(
+                        leading: GestureDetector(
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            if (isAi) {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ResponderProfileScreen(
+                                    responder: ResponderModel.ai(),
+                                    currentUserId: widget.currentUserId,
+                                    currentUserName: widget.currentUserName,
+                                    isCurrentUserProfile: false,
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            _showResponderProfile(responderUid);
+                          },
+                          child: CircleAvatar(
+                            backgroundColor:
+                                Theme.of(context).colorScheme.primaryContainer,
+                            child: const Icon(Icons.person),
+                          ),
+                        ),
+                        title: Text(name,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: const Text('Tap avatar for profile'),
+                        trailing: PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_horiz),
+                          onSelected: (value) {
+                            Navigator.pop(ctx);
+                            if (value == 'review') {
+                              if (isAi) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('AI Assistant cannot be reviewed.'),
+                                  ),
+                                );
+                                return;
+                              }
+                              _showReviewAndRatingDialog(
+                                responderUid: responderUid,
+                                responderName: name,
+                              );
+                              return;
+                            }
+                            if (value == 'remove') {
+                              _confirmRemoveResponder(
+                                messenger: ScaffoldMessenger.of(context),
+                                responderUid: responderUid,
+                                responderName: name,
+                              );
+                            }
+                          },
+                          itemBuilder: (menuContext) => <PopupMenuEntry<String>>[
+                            const PopupMenuItem<String>(
+                              value: 'review',
+                              child: Text('Review & Rating'),
+                            ),
+                            if (_canManageResponders && !isAi &&
+                                responderUid != widget.currentUserId)
+                              const PopupMenuItem<String>(
+                                value: 'remove',
+                                child: Text('Remove Responder'),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
         );
       },
     );
@@ -1353,13 +2185,14 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
       Navigator.of(context).maybePop();
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to leave chat right now. Please retry.'),
-          ),
-        );
+      if (!mounted) {
+        return;
       }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to leave chat right now. Please retry.'),
+        ),
+      );
     }
   }
 
@@ -1420,6 +2253,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   Future<void> _toggleChatAudioPlayback(String audioUrl) async {
+    HapticFeedback.selectionClick();
     if (_playingChatAudioUrl == audioUrl) {
       if (_isChatAudioPlaying) {
         await _chatAudioPlayer.pause();
@@ -1449,6 +2283,118 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         _chatAudioPosition = Duration.zero;
         _chatAudioDuration = Duration.zero;
       });
+    }
+  }
+
+  void _configureTextToSpeech() {
+    _flutterTts.setCompletionHandler(() {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _speakingMessageId = null;
+      });
+    });
+    _flutterTts.setCancelHandler(() {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _speakingMessageId = null;
+      });
+    });
+    unawaited(_flutterTts.setSpeechRate(0.46));
+    unawaited(_flutterTts.setPitch(1.0));
+    unawaited(_flutterTts.setVolume(1.0));
+    unawaited(_flutterTts.setLanguage('en-IN'));
+  }
+
+  Future<void> _toggleMessageReadAloud({
+    required String messageId,
+    required String senderName,
+    required String text,
+  }) async {
+    final safeText = text.trim();
+    if (safeText.isEmpty) {
+      return;
+    }
+
+    if (_speakingMessageId == messageId) {
+      await _flutterTts.stop();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _speakingMessageId = null;
+      });
+      HapticFeedback.selectionClick();
+      return;
+    }
+
+    await _flutterTts.stop();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _speakingMessageId = messageId;
+    });
+    HapticFeedback.lightImpact();
+    await _flutterTts.speak('Message from $senderName. $safeText');
+  }
+
+  String _buildMessageSemanticLabel({
+    required String senderName,
+    required String text,
+    required bool isAiMessage,
+    required DateTime? createdAt,
+    required bool hasImageAttachment,
+    required bool hasAudioAttachment,
+  }) {
+    final senderLabel = isAiMessage ? '$senderName, AI assistant' : senderName;
+    final timeLabel = createdAt == null ? '' : ' at ${_timeText(createdAt)}';
+    final parts = <String>['Message from $senderLabel$timeLabel'];
+    final safeText = text.trim();
+    if (safeText.isNotEmpty) {
+      parts.add(safeText);
+    }
+    if (hasImageAttachment) {
+      parts.add('Includes image attachment');
+    }
+    if (hasAudioAttachment) {
+      parts.add('Includes audio attachment');
+    }
+    return parts.join('. ');
+  }
+
+  Future<void> _toggleChatNotifications(bool enabled) async {
+    try {
+      await _chatService.setChatNotificationPreference(
+        sosId: widget.sosId,
+        userId: widget.currentUserId,
+        enabled: enabled,
+      );
+      HapticFeedback.selectionClick();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled
+                ? 'Chat notifications enabled for this conversation.'
+                : 'Chat notifications disabled for this conversation.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to update notification setting right now.'),
+        ),
+      );
     }
   }
 
@@ -1606,17 +2552,478 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     });
   }
 
-  Widget _buildHeader(
-    BuildContext context, {
-    required int responderOnlineCount,
+  double? _asDouble(dynamic val) {
+    if (val == null) return null;
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val);
+    if (val is GeoPoint) return val.latitude;
+    return null;
+  }
+
+  void _showAttachOptions(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Take photo'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickCameraAttachment();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Pick from gallery'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickImageAttachment();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.location_on_outlined),
+              title: const Text('Share my location'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _shareCurrentLocation();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAiStatusBadge(Map<String, dynamic> chatData) {
+    // We assume AI is Active by default unless the last verified source was BUILTIN (fallback)
+    final aiSource = (chatData['lastAiSource'] as String?) ?? '';
+    final isFallback = aiSource == 'BUILTIN';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          isFallback ? Icons.memory : Icons.auto_awesome,
+          size: 12,
+          color: isFallback ? Colors.orange[700] : Colors.blue[800],
+        ),
+        const SizedBox(width: 4),
+        Text(
+          isFallback ? 'AI Offline' : 'AI Active',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.normal,
+            color: isFallback ? Colors.orange[700] : Colors.blue[800],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _typingDots(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _typingDotsController,
+      builder: (context, child) {
+        final progress = _typingDotsController.value;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (index) {
+            final phase = (progress + (index * 0.2)) % 1.0;
+            final opacity = 0.35 + (phase * 0.65);
+            final scale = 0.85 + (phase * 0.25);
+            return Opacity(
+              opacity: opacity,
+              child: Transform.scale(
+                scale: scale,
+                child: Container(
+                  width: 7,
+                  height: 7,
+                  margin: EdgeInsets.only(left: index == 0 ? 0 : 4),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade500,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+
+  Future<void> _shareCurrentLocation() async {
+    if (!mounted) return;
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever ||
+          permission == LocationPermission.denied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location permission denied.')),
+          );
+        }
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      final lat = pos.latitude.toStringAsFixed(6);
+      final lng = pos.longitude.toStringAsFixed(6);
+      // Use geo: URI — Android shows an "Open with" chooser for Maps/navigation apps
+      final locationMsg =
+          '📍 My Location\ngeo:$lat,$lng\nhttps://maps.google.com/?q=$lat,$lng';
+
+      await _chatService.sendMessage(
+        sosId: widget.sosId,
+        senderUid: widget.currentUserId,
+        senderName: widget.currentUserName,
+        senderRole: widget.currentUserRole,
+        text: locationMsg,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not get location: $e')),
+        );
+      }
+    }
+  }
+
+  void _showResponderOptions({
+    required BuildContext context,
+    required Map<String, dynamic> participantData,
+    required String responderName,
   }) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          'RescueLink Group Chat • $responderOnlineCount responders online',
-          style: Theme.of(context).textTheme.titleMedium,
+    final nav = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final isAi = (participantData['isAi'] as bool?) ?? false;
+    final responderUid =
+        isAi ? 'rescuelink_ai' : ((participantData['uid'] as String?) ?? '');
+    final safeResponderName = isAi ? 'RescueLink AI' : responderName;
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Text(
+                safeResponderName,
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('View Profile'),
+              onTap: () {
+                Navigator.pop(ctx);
+                if (isAi) {
+                  nav.push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ResponderProfileScreen(
+                        responder: ResponderModel.ai(),
+                        currentUserId: widget.currentUserId,
+                        currentUserName: widget.currentUserName,
+                        isCurrentUserProfile: false,
+                      ),
+                    ),
+                  );
+                  return;
+                }
+                _showResponderProfile(responderUid);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.rate_review_outlined),
+              title: const Text('Review & Rating'),
+              onTap: () {
+                Navigator.pop(ctx);
+                if (isAi) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                        content: Text('AI Assistant cannot be reviewed.')),
+                  );
+                  return;
+                }
+                _showReviewAndRatingDialog(
+                  responderUid: responderUid,
+                  responderName: safeResponderName,
+                );
+              },
+            ),
+            if (_canManageResponders && !isAi &&
+                responderUid != widget.currentUserId) ...[
+              const Divider(height: 1),
+              ListTile(
+                leading:
+                    const Icon(Icons.person_remove_outlined, color: Colors.red),
+                title: const Text('Remove from Chat',
+                    style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _confirmRemoveResponder(
+                    messenger: messenger,
+                    responderUid: responderUid,
+                    responderName: safeResponderName,
+                  );
+                },
+              ),
+            ],
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmRemoveResponder({
+    required ScaffoldMessengerState messenger,
+    required String responderUid,
+    required String responderName,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Responder?'),
+        content: Text(
+            'Are you sure you want to remove $responderName from this conversation? They will not be able to rejoin without your approval.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await _chatService.removeResponder(
+                  sosId: widget.sosId,
+                  responderUid: responderUid,
+                  responderName: responderName,
+                  removedByUid: widget.currentUserId,
+                );
+                messenger.showSnackBar(
+                  SnackBar(content: Text('$responderName has been removed.')),
+                );
+              } catch (e) {
+                messenger.showSnackBar(
+                  SnackBar(content: Text('Failed to remove: $e')),
+                );
+              }
+            },
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showReviewAndRatingDialog({
+    required String responderUid,
+    required String responderName,
+  }) async {
+    if (responderUid.trim().isEmpty) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    final reviewDocId = '${widget.currentUserId}_$responderUid';
+    final directReviewRef = FirebaseFirestore.instance
+        .collection('responder_reviews')
+        .doc(reviewDocId);
+    DocumentReference<Map<String, dynamic>> reviewRef = directReviewRef;
+    var reviewSnapshot = await directReviewRef.get();
+
+    if (!reviewSnapshot.exists) {
+      final fallback = await FirebaseFirestore.instance
+          .collection('responder_reviews')
+          .where('reviewerUid', isEqualTo: widget.currentUserId)
+          .where('responderUid', isEqualTo: responderUid)
+          .get();
+      if (fallback.docs.isNotEmpty) {
+        final selectedDoc =
+            pickLatestByUpdatedAt<QueryDocumentSnapshot<Map<String, dynamic>>>(
+                  fallback.docs,
+                  (doc) => doc.data()['updatedAt'],
+                ) ??
+                fallback.docs.first;
+        reviewSnapshot = selectedDoc;
+        reviewRef = selectedDoc.reference;
+      }
+    }
+
+    final reviewData = reviewSnapshot.data() ?? <String, dynamic>{};
+
+    double selectedRating = (reviewData['rating'] as num?)?.toDouble() ?? 0;
+    var reviewText = (reviewData['review'] as String?) ?? '';
+    final hasExistingReview = reviewSnapshot.exists;
+    var isSubmitting = false;
+
+    if (!mounted) {
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('Review $responderName'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Give both a rating and a review.'),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (i) {
+                    return IconButton(
+                      icon: Icon(
+                        i < selectedRating ? Icons.star : Icons.star_border,
+                        color: Colors.amber,
+                        size: 36,
+                      ),
+                      onPressed: () =>
+                          setDialogState(() => selectedRating = i + 1.0),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  initialValue: reviewText,
+                  onChanged: (value) {
+                    reviewText = value;
+                    setDialogState(() {});
+                  },
+                  maxLines: 4,
+                  maxLength: 400,
+                  enabled: !isSubmitting,
+                  decoration: const InputDecoration(
+                    hintText: 'Describe your experience...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            if (hasExistingReview)
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                onPressed: isSubmitting
+                    ? null
+                    : () async {
+                        if (!ctx.mounted) {
+                          return;
+                        }
+                        setDialogState(() {
+                          isSubmitting = true;
+                        });
+                  try {
+                    await reviewRef.delete();
+                  } catch (e) {
+                    if (ctx.mounted) {
+                      setDialogState(() {
+                        isSubmitting = false;
+                      });
+                    }
+                    if (mounted) {
+                      messenger.showSnackBar(
+                        SnackBar(content: Text('Unable to delete review: $e')),
+                      );
+                    }
+                    return;
+                  }
+                  if (!ctx.mounted) {
+                    return;
+                  }
+                  Navigator.pop(ctx);
+                  if (!mounted) {
+                    return;
+                  }
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Review deleted.')),
+                  );
+                    },
+                child: const Text('Delete'),
+              ),
+            TextButton(
+              onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: isSubmitting ||
+                      (selectedRating <= 0 && reviewText.trim().isEmpty)
+                  ? null
+                  : () async {
+                      if (!ctx.mounted) {
+                        return;
+                      }
+                      setDialogState(() {
+                        isSubmitting = true;
+                      });
+                    final updatePayload = <String, dynamic>{
+                      'reviewerUid': widget.currentUserId,
+                      'reviewerName': widget.currentUserName,
+                      'responderUid': responderUid,
+                      'responderName': responderName,
+                      'review': reviewText.trim(),
+                      'updatedAt': FieldValue.serverTimestamp(),
+                    };
+                    if (selectedRating > 0) {
+                      updatePayload['rating'] = selectedRating;
+                    }
+                    try {
+                      await reviewRef.set(updatePayload, SetOptions(merge: true));
+                    } catch (e) {
+                      if (ctx.mounted) {
+                        setDialogState(() {
+                          isSubmitting = false;
+                        });
+                      }
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          SnackBar(content: Text('Unable to save review: $e')),
+                        );
+                      }
+                      return;
+                    }
+                    if (!ctx.mounted) {
+                      return;
+                    }
+                    Navigator.pop(ctx);
+                    if (mounted) {
+                      messenger.showSnackBar(
+                        SnackBar(content: Text('Review saved for $responderName')),
+                      );
+                    }
+                    },
+                child: const Text('Save Review'),
+            ),
+          ],
         ),
       ),
     );
@@ -1626,56 +3033,247 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     BuildContext context, {
     required String message,
     required List<Map<String, dynamic>> media,
+    Map<String, dynamic> overview = const {},
   }) {
-    return Card(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'SOS Overview',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            Text(message),
-            if (media.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 72,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: media.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final item = media[index];
-                    final type = (item['type'] as String?) ?? 'media';
-                    final url = (item['url'] as String?) ?? '';
-                    final isImage = type.toLowerCase().contains('image');
-
-                    if (isImage && url.isNotEmpty) {
-                      return ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          url,
-                          width: 72,
-                          height: 72,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _mediaFallback(type),
-                        ),
-                      );
-                    }
-
-                    return _mediaFallback(type);
-                  },
-                ),
+    final isExpanded = _showFullOverview;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: Card(
+        elevation: 2,
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            setState(() {
+              _showFullOverview = !_showFullOverview;
+            });
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.emergency_outlined,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isExpanded ? 'Emergency Overview' : message,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  if (!isExpanded) ...[
+                    if (media.isNotEmpty)
+                      Row(
+                        children: media.take(3).map((item) {
+                          final type = (item['type'] as String?) ?? '';
+                          IconData iconData = Icons.insert_drive_file;
+                          if (type.contains('image')) {
+                            iconData = Icons.image;
+                          }
+                          if (type.contains('audio')) {
+                            iconData = Icons.audiotrack;
+                          }
+                          if (type.contains('video')) {
+                            iconData = Icons.videocam;
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: Icon(iconData, size: 14, color: Colors.grey),
+                          );
+                        }).toList(),
+                      ),
+                    if (overview.containsKey('latitude') ||
+                        overview.containsKey('address'))
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Icon(Icons.location_on,
+                            size: 14, color: Colors.red[700]),
+                      ),
+                  ],
+                  const SizedBox(width: 4),
+                  Icon(
+                    isExpanded ? Icons.expand_less : Icons.expand_more,
+                    size: 22,
+                    color: Colors.grey[600],
+                  ),
+                ],
               ),
-            ],
-          ],
+              if (isExpanded) ...<Widget>[
+                const SizedBox(height: 10),
+                Text(message),
+                // Show SOS trigger location if available
+                Builder(builder: (context) {
+                  final lat = _asDouble(overview['latitude']);
+                  final lng = _asDouble(overview['longitude']);
+                  final address = (overview['address'] as String?)?.trim();
+                  final coordStr = lat != null
+                      ? '${lat.toStringAsFixed(5)}, ${lng?.toStringAsFixed(5)}'
+                      : '';
+                  final displayText =
+                      address?.isNotEmpty == true ? address! : coordStr;
+                  final mapsUrl = lat != null
+                      ? 'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng?.toStringAsFixed(6)}'
+                      : null;
+                  if (lat == null && address == null) {
+                    return const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: GestureDetector(
+                      onTap: lat != null
+                          ? () async {
+                              // Try geo: URI first (Android navigation chooser),
+                              // fall back to Google Maps web URL.
+                              final geoUri = Uri.parse(
+                                  'geo:${lat.toStringAsFixed(6)},${lng?.toStringAsFixed(6)}');
+                              try {
+                                await launchUrl(geoUri,
+                                    mode: LaunchMode.externalApplication);
+                              } catch (_) {
+                                final webUri = Uri.parse(
+                                    'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng?.toStringAsFixed(6)}');
+                                await launchUrl(webUri,
+                                    mode: LaunchMode.externalApplication);
+                              }
+                            }
+                          : null,
+                      child: Row(
+                        children: <Widget>[
+                          const Icon(Icons.location_on,
+                              size: 16, color: Colors.red),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              displayText,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: mapsUrl != null
+                                        ? Colors.blue[700]
+                                        : null,
+                                    decoration: mapsUrl != null
+                                        ? TextDecoration.underline
+                                        : null,
+                                  ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (mapsUrl != null)
+                            const Icon(Icons.open_in_new,
+                                size: 14, color: Colors.blue),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+                if (media.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 72,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: media.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final item = media[index];
+                        final type = (item['type'] as String?) ?? 'media';
+                        final url = (item['url'] as String?) ?? '';
+                        final isImage = type.toLowerCase().contains('image');
+
+                        if (isImage && url.isNotEmpty) {
+                          // Try displaying the image URL in a clean pop-up module.
+                          return GestureDetector(
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (_) => Dialog(
+                                  backgroundColor: Colors.transparent,
+                                  insetPadding: const EdgeInsets.all(12),
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      InteractiveViewer(
+                                        child: ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          child: Image.network(url,
+                                              fit: BoxFit.contain),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        right: 0,
+                                        top: 0,
+                                        child: IconButton(
+                                          icon: const Icon(Icons.cancel,
+                                              color: Colors.white, size: 32),
+                                          onPressed: () =>
+                                              Navigator.of(context).pop(),
+                                        ),
+                                      )
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(
+                                url,
+                                width: 72,
+                                height: 72,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) =>
+                                    _mediaFallback(type),
+                              ),
+                            ),
+                          );
+                        }
+
+                        // For non-images (e.g. audio), also allow tapping to open embedded viewer.
+                        return GestureDetector(
+                          onTap: () {
+                            if (url.isNotEmpty) {
+                              showDialog(
+                                context: context,
+                                builder: (_) => AlertDialog(
+                                  title: const Text('Audio Note'),
+                                  content: _buildAudioAttachmentBubble(url),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(),
+                                      child: const Text('Close'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                          },
+                          child: _mediaFallback(type),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1691,11 +3289,441 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       ),
       alignment: Alignment.center,
       child: Text(
-        type,
+        type.contains('/') ? type.split('/').last : type,
         textAlign: TextAlign.center,
         style: const TextStyle(fontSize: 11),
       ),
     );
+  }
+
+  Widget _buildAiMessageContent(BuildContext context, String text) {
+    // Extract source and status markers
+    String cleanText = text;
+    String? sourceMarker;
+    String? statusMarker;
+
+    final sourceMatch =
+        RegExp(r'\[\[AI_SOURCE:(GEMINI|BUILTIN)\]\]').firstMatch(text);
+    if (sourceMatch != null) {
+      sourceMarker = sourceMatch.group(1);
+      cleanText = cleanText.replaceFirst(sourceMatch.group(0)!, '').trim();
+    }
+
+    final statusMatch = RegExp(r'\[\[AI_STATUS:([^\]]+)\]\]').firstMatch(text);
+    if (statusMatch != null) {
+      statusMarker = statusMatch.group(1);
+      cleanText = cleanText.replaceFirst(statusMatch.group(0)!, '').trim();
+    }
+
+    if (statusMarker != null &&
+        statusMarker.toUpperCase().contains('GENERATING')) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _typingDots(context),
+          const SizedBox(width: 10),
+          Text(
+            'AI is typing',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.red.shade800,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
+      );
+    }
+
+    // Extract all YouTube video IDs in order and deduplicate.
+    final youtubeIds = extractYoutubeVideoIds(cleanText);
+    final visibleText = youtubeIds.isNotEmpty
+      ? _removeYoutubeUrlsForDisplay(cleanText)
+      : cleanText;
+
+    // Extract phone numbers
+    final phoneNumbers = _extractPhoneNumbers(visibleText);
+
+    // Split text by markdown elements and build widgets
+    final lines = visibleText.split('\n');
+    final widgets = <Widget>[];
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+
+      if (trimmed.startsWith('-')) {
+        // Bullet point
+        widgets.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text('• ',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600)),
+              Expanded(
+                child: DefaultTextStyle(
+                  style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                        height: 1.35,
+                        color: Colors.red.shade900,
+                      ),
+                  child:
+                      _buildBoldAwareText(context, trimmed.substring(1).trim()),
+                ),
+              ),
+            ],
+          ),
+        ));
+      } else if (RegExp(r'^\d+\.').hasMatch(trimmed)) {
+        // Numbered list
+        final match = RegExp(r'^(\d+)\.\s*(.*)$').firstMatch(trimmed);
+        if (match != null) {
+          widgets.add(Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('${match.group(1)}. ',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600)),
+                Expanded(
+                  child: DefaultTextStyle(
+                    style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                          height: 1.35,
+                          color: Colors.red.shade900,
+                        ),
+                    child: _buildBoldAwareText(context, match.group(2)!),
+                  ),
+                ),
+              ],
+            ),
+          ));
+        }
+      } else {
+        // Regular text with bold support
+        widgets.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: DefaultTextStyle(
+            style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                  height: 1.35,
+                  color: Colors.red.shade900,
+                ),
+            child: _buildBoldAwareText(context, trimmed),
+          ),
+        ));
+      }
+    }
+
+    // Add source and status badges
+    if (sourceMarker != null || statusMarker != null) {
+      widgets.add(const SizedBox(height: 12));
+      widgets.add(Wrap(
+        spacing: 8,
+        children: <Widget>[
+          if (sourceMarker != null)
+            Tooltip(
+              message: sourceMarker == 'GEMINI'
+                  ? 'Gemini AI'
+                  : 'Offline Built-in AI',
+              child: Icon(
+                sourceMarker == 'GEMINI' ? Icons.auto_awesome : Icons.memory,
+                size: 16,
+                color: sourceMarker == 'GEMINI'
+                    ? Colors.blue[800]
+                    : Colors.orange[800],
+              ),
+            ),
+          if (statusMarker != null)
+            Tooltip(
+              message: 'Status: ${statusMarker.toUpperCase()}',
+              child: Icon(
+                statusMarker.toUpperCase().contains('SUCCESS')
+                    ? Icons.check_circle_outline
+                    : Icons.info_outline,
+                size: 16,
+                color: statusMarker.toUpperCase().contains('SUCCESS')
+                    ? Colors.green
+                    : Colors.grey,
+              ),
+            ),
+        ],
+      ));
+    }
+
+    // Add one embedded-style preview card per discovered YouTube video.
+    if (youtubeIds.isNotEmpty) {
+      widgets.add(const SizedBox(height: 12));
+      for (var index = 0; index < youtubeIds.length; index++) {
+        widgets.add(
+          Padding(
+            padding: EdgeInsets.only(bottom: index == youtubeIds.length - 1 ? 0 : 8),
+            child: _buildYoutubePreviewCard(
+              context,
+              youtubeIds[index],
+              index: index,
+              total: youtubeIds.length,
+            ),
+          ),
+        );
+      }
+    }
+
+    // Add call buttons if phone numbers found (already deduplicated via .toSet())
+    if (phoneNumbers.isNotEmpty) {
+      widgets.add(const SizedBox(height: 8));
+      widgets.add(_buildCallButtons(context, phoneNumbers));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: widgets,
+    );
+  }
+
+  String _removeYoutubeUrlsForDisplay(String text) {
+    final withoutWatchUrls = text.replaceAll(
+      RegExp(
+        r'https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    final withoutShortUrls = withoutWatchUrls.replaceAll(
+      RegExp(
+        r'https?:\/\/youtu\.be\/[A-Za-z0-9_-]{11}',
+        caseSensitive: false,
+      ),
+      '',
+    );
+
+    return withoutShortUrls
+        .split('\n')
+        .map((line) => line.trimRight())
+        .where((line) => line.trim().isNotEmpty)
+        .join('\n');
+  }
+
+  Widget _buildYoutubePreviewCard(
+    BuildContext context,
+    String youtubeId, {
+    required int index,
+    required int total,
+  }) {
+    final youtubeUrl = Uri.parse('https://www.youtube.com/watch?v=$youtubeId');
+    final thumbnailUrl =
+        'https://img.youtube.com/vi/$youtubeId/hqdefault.jpg';
+    final title = total > 1
+        ? 'Watch AI Visual Guide ${index + 1}/$total'
+        : 'Watch AI Visual Guidance Video';
+
+    return GestureDetector(
+      onTap: () async {
+        try {
+          await launchUrl(youtubeUrl, mode: LaunchMode.inAppWebView);
+        } catch (_) {
+          await launchUrl(youtubeUrl, mode: LaunchMode.externalApplication);
+        }
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.red[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.red[200]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      thumbnailUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: Colors.red[100],
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.ondemand_video,
+                          color: Colors.red[300],
+                          size: 42,
+                        ),
+                      ),
+                    ),
+                    Container(color: Colors.black.withValues(alpha: 0.15)),
+                    Center(
+                      child: Icon(
+                        Icons.play_circle_fill,
+                        color: Colors.white.withValues(alpha: 0.95),
+                        size: 56,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: Colors.red[900],
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.open_in_new, color: Colors.red[400], size: 18),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Renders plain chat text but makes geo: and https: URLs tappable.
+  Widget _buildLinkableText(BuildContext context, String text) {
+    // Pattern matches geo:lat,lng  or  https://...
+    final urlPattern =
+        RegExp(r'(geo:\-?\d+(\.\d+)?,\-?\d+(\.\d+)?)|(https?://[^\s]+)');
+    final matches = urlPattern.allMatches(text);
+    if (matches.isEmpty) return Text(text);
+
+    final spans = <InlineSpan>[];
+    int last = 0;
+    final style = DefaultTextStyle.of(context).style;
+    final linkStyle = style.copyWith(
+      color: Colors.blue[700],
+      decoration: TextDecoration.underline,
+    );
+
+    for (final m in matches) {
+      if (m.start > last) {
+        spans.add(TextSpan(text: text.substring(last, m.start), style: style));
+      }
+      final url = m.group(0)!;
+      spans.add(WidgetSpan(
+        alignment: PlaceholderAlignment.baseline,
+        baseline: TextBaseline.alphabetic,
+        child: GestureDetector(
+          onTap: () async {
+            try {
+              await launchUrl(Uri.parse(url),
+                  mode: LaunchMode.externalApplication);
+            } catch (_) {
+              await launchUrl(Uri.parse(url), mode: LaunchMode.inAppWebView);
+            }
+          },
+          child: Text(
+            url.startsWith('geo:') ? '📍 Open in Maps' : url,
+            style: linkStyle,
+          ),
+        ),
+      ));
+      last = m.end;
+    }
+    if (last < text.length) {
+      spans.add(TextSpan(text: text.substring(last), style: style));
+    }
+
+    return RichText(text: TextSpan(children: spans));
+  }
+
+  Widget _buildBoldAwareText(BuildContext context, String text) {
+    final parts = <TextSpan>[];
+    final regex = RegExp(r'\*\*(.+?)\*\*');
+    int lastIndex = 0;
+
+    for (final match in regex.allMatches(text)) {
+      if (match.start > lastIndex) {
+        parts.add(TextSpan(text: text.substring(lastIndex, match.start)));
+      }
+      parts.add(TextSpan(
+        text: match.group(1),
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ));
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < text.length) {
+      parts.add(TextSpan(text: text.substring(lastIndex)));
+    }
+
+    return RichText(
+      text: TextSpan(
+        style: DefaultTextStyle.of(context).style.copyWith(height: 1.35),
+        children: parts,
+      ),
+    );
+  }
+
+  List<String> _extractPhoneNumbers(String text) {
+    // Match only genuine short emergency codes (3-4 digits) or full phone numbers.
+    // Avoids matching arbitrary 2-digit numbers like "77" that appear in normal text.
+    final phonePattern = RegExp(
+      r'\b(?:'
+      r'\d{3,4}|' // 3–4 digit short codes: 112, 100, 108, 911
+      r'\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}' // international/10-digit
+      r')\b',
+    );
+    // Additional filter: skip numbers that are clearly not emergency/phone numbers
+    const knownPhoneMinValue =
+        100; // nothing below 100 is a real emergency number
+    return phonePattern
+        .allMatches(text)
+        .map((m) => m.group(0)!.replaceAll(RegExp(r'[\s.-]'), ''))
+        .where((phoneNumber) {
+          final parsed = int.tryParse(phoneNumber);
+          // If it parsed as a plain integer and is < 100, skip it
+          return parsed == null || parsed >= knownPhoneMinValue;
+        })
+        .toSet()
+        .toList();
+  }
+
+  // Emergency number logic is now handled in ChatService logic where appropriate.
+  // We keep local helpers for the real-time chips.
+
+  Widget _buildCallButtons(BuildContext context, List<String> phoneNumbers) {
+    return Wrap(
+      spacing: 8,
+      children: phoneNumbers
+          .map((phoneNum) => GestureDetector(
+                onTap: () => _callEmergencyNumber(phoneNum),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: Colors.red[100],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const Text('📞', style: TextStyle(fontSize: 14)),
+                      const SizedBox(width: 4),
+                      Text(phoneNum,
+                          style: const TextStyle(fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
+              ))
+          .toList(),
+    );
+  }
+
+  Future<void> _callEmergencyNumber(String phoneNumber) async {
+    final cleanNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+    final uri = Uri(scheme: 'tel', path: cleanNumber);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
   }
 
   int _resolveResponderOnlineCount(Map<String, dynamic> chatData) {
@@ -1862,3 +3890,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     return '${base.substring(0, maxUiNameLength)}...';
   }
 }
+
+// YoutubeVideoEmbed removed — YouTube videos now open via native app (LaunchMode.externalApplication)
+// to bypass iframe embed error 152 restrictions on official emergency content channels.
