@@ -200,3 +200,138 @@ exports.dispatchEmergencyRequest = onDocumentCreated(
     return null;
   }
 );
+
+function summarizeChatMessage(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) {
+    return 'New media message';
+  }
+  return trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed;
+}
+
+function isAiOrSystemMessage(messageData) {
+  const senderUid = String(messageData.senderUid || '').trim();
+  return messageData.isAi === true ||
+    senderUid === 'rescuelink_ai' ||
+    messageData.isSystem === true ||
+    String(messageData.type || '').toLowerCase() === 'system';
+}
+
+function extractParticipantUids(chatData) {
+  const fromParticipantUids = Array.isArray(chatData.participantUids)
+    ? chatData.participantUids.map((uid) => String(uid || '').trim()).filter(Boolean)
+    : [];
+
+  const fromParticipants = Array.isArray(chatData.participants)
+    ? chatData.participants
+        .map((entry) => String(entry?.uid || '').trim())
+        .filter(Boolean)
+    : [];
+
+  return Array.from(new Set([...fromParticipantUids, ...fromParticipants]));
+}
+
+async function collectTokensForUsers(userUids) {
+  const tokenSet = new Set();
+
+  await Promise.all(
+    userUids.map(async (uid) => {
+      const deviceSnap = await admin
+        .firestore()
+        .collection('users')
+        .doc(uid)
+        .collection('devices')
+        .get();
+
+      deviceSnap.docs.forEach((doc) => {
+        const token = String(doc.data().token || '').trim();
+        if (token) {
+          tokenSet.add(token);
+        }
+      });
+    })
+  );
+
+  return Array.from(tokenSet);
+}
+
+exports.dispatchChatMessageNotifications = onDocumentCreated(
+  'chats/{sosId}/messages/{messageId}',
+  async (event) => {
+    const messageData = event.data?.data();
+    if (!messageData || isAiOrSystemMessage(messageData)) {
+      return null;
+    }
+
+    const sosId = String(event.params.sosId || '').trim();
+    const senderUid = String(messageData.senderUid || '').trim();
+    if (!sosId || !senderUid) {
+      return null;
+    }
+
+    const chatSnap = await admin.firestore().collection('chats').doc(sosId).get();
+    const chatData = chatSnap.data() || {};
+
+    const status = String(chatData.status || 'active').toLowerCase();
+    if (status === 'cancelled') {
+      return null;
+    }
+
+    const notificationPreferences =
+      (chatData.notificationPreferences && typeof chatData.notificationPreferences === 'object')
+        ? chatData.notificationPreferences
+        : {};
+
+    const recipientUids = extractParticipantUids(chatData)
+      .filter((uid) => uid !== senderUid)
+      .filter((uid) => notificationPreferences[uid] !== false);
+
+    if (recipientUids.length === 0) {
+      return null;
+    }
+
+    const tokens = await collectTokensForUsers(recipientUids);
+    if (tokens.length === 0) {
+      return null;
+    }
+
+    const senderName = String(messageData.senderName || 'Participant').trim() || 'Participant';
+    const previewText = summarizeChatMessage(messageData.text);
+
+    const multicast = {
+      tokens,
+      notification: {
+        title: 'New message in group chat',
+        body: `${senderName}: ${previewText}`,
+      },
+      data: {
+        type: 'chat_message',
+        chatSosId: sosId,
+        senderUid,
+        senderName,
+        messageId: String(event.params.messageId || ''),
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'rescue_link_alerts',
+        },
+      },
+      apns: {
+        headers: {
+          'apns-priority': '10',
+        },
+      },
+    };
+
+    const response = await admin.messaging().sendEachForMulticast(multicast);
+    logger.info('Chat message notification dispatch complete', {
+      sosId,
+      messageId: event.params.messageId,
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+    });
+
+    return null;
+  }
+);

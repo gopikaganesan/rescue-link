@@ -112,6 +112,25 @@ class ResponderModel {
     );
   }
 
+  static ResponderModel ai() {
+    return ResponderModel(
+      id: 'rescuelink_ai',
+      userId: 'rescuelink_ai',
+      name: 'RescueLink AI',
+      phoneNumber: '',
+      skillsArea: 'Emergency Guidance, Logistics, Medical Dispatch',
+      responderType: 'AI Assistant',
+      verificationLevel: 'System Verified',
+      verifiedResponder: true,
+      rescueCount: 999,
+      averageRating: 5.0,
+      ratingCount: 0, // Will be replaced by live count in UI
+      latitude: 0,
+      longitude: 0,
+      registeredAt: DateTime(2024),
+    );
+  }
+
   ResponderModel copyWith({
     String? id,
     String? userId,

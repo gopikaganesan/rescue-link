@@ -85,7 +85,6 @@ class _AuthScreenState extends State<AuthScreen> {
               .map(
                 (code) => RadioListTile<String>(
                   value: code,
-                  groupValue: settings.languageCode,
                   title: Text(settings.languageLabel(code)),
                   onChanged: (value) {
                     if (value != null) {
