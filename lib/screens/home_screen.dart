@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:animated_bottom_navigation_bar/animated_bottom_navigation_bar.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:image_picker/image_picker.dart';
@@ -21,6 +22,7 @@ import '../core/providers/responder_provider.dart';
 import '../core/services/notification_service.dart';
 import '../core/services/media_upload_service.dart';
 import '../core/services/responder_matching_service.dart';
+import '../core/services/sos_service.dart';
 import '../core/services/transcription_service.dart';
 import 'auth_screen.dart';
 import 'group_chat_screen.dart';
@@ -42,8 +44,19 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _isSosInProgress = false;
   Timer? _responderPollingTimer;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+    _openChatHeadsSub;
+  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+    _openChatMessageSubs =
+    <String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>{};
+  final Map<String, bool> _chatNotificationPreferenceBySosId =
+    <String, bool>{};
+  final Set<String> _primedChatSosIds = <String>{};
+  final Map<String, String> _lastSeenChatMessageIdBySosId =
+    <String, String>{};
+  String? _chatWatcherUserId;
   final Set<String> _notifiedRequestIds = <String>{};
-  String _lastDeliveryRoute = 'Internet route';
+  String _lastDeliveryRoute = '';
   String? _currentSosRequestId; // Track current SOS for cancellation
   int _bottomNavIndex = 0;
   final ImagePicker _imagePicker = ImagePicker();
@@ -100,6 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await emergencyProvider.retryPendingSync();
     await _syncPushProfile();
     _startResponderAlertPolling();
+    _startOpenAppChatNotificationWatchers();
   }
 
   Future<void> _initializeSpeech() async {
@@ -159,6 +173,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkResponderAlerts() async {
     final auth = context.read<AuthProvider>();
+    final settings = context.read<AppSettingsProvider>();
+    if (!settings.notificationsEnabled) {
+      return;
+    }
+
     final me = auth.currentUser;
     if (me == null || !me.isResponder) {
       return;
@@ -197,12 +216,134 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       _notifiedRequestIds.add(request.id);
-      await NotificationService.showSosAlert(
+      await NotificationService.showResponderSosAlert(
+        requestId: request.id,
         title: 'New Nearby SOS (${request.severity.toUpperCase()})',
         body:
             '${request.category} • ${request.recommendedSkill} • ${distance.toStringAsFixed(1)} km',
       );
     }
+  }
+
+  void _startOpenAppChatNotificationWatchers() {
+    final auth = context.read<AuthProvider>();
+    final settings = context.read<AppSettingsProvider>();
+    final user = auth.currentUser;
+    if (user == null || !settings.notificationsEnabled) {
+      _stopOpenAppChatNotificationWatchers();
+      return;
+    }
+
+    if (_chatWatcherUserId == user.id && _openChatHeadsSub != null) {
+      return;
+    }
+
+    _stopOpenAppChatNotificationWatchers();
+    _chatWatcherUserId = user.id;
+
+    _openChatHeadsSub = FirebaseFirestore.instance
+        .collection('chats')
+        .where('participantUids', arrayContains: user.id)
+        .where('status', isEqualTo: 'active')
+        .snapshots()
+        .listen((snapshot) {
+      final activeChatIds = snapshot.docs.map((doc) => doc.id).toSet();
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final preferences = (data['notificationPreferences'] as Map?) ??
+            const <String, dynamic>{};
+        _chatNotificationPreferenceBySosId[doc.id] = preferences[user.id] != false;
+
+        if (!_openChatMessageSubs.containsKey(doc.id)) {
+          _watchLatestChatMessage(doc.id, user.id);
+        }
+      }
+
+      final staleIds = _openChatMessageSubs.keys
+          .where((id) => !activeChatIds.contains(id))
+          .toList();
+      for (final staleId in staleIds) {
+        _openChatMessageSubs.remove(staleId)?.cancel();
+        _chatNotificationPreferenceBySosId.remove(staleId);
+        _primedChatSosIds.remove(staleId);
+        _lastSeenChatMessageIdBySosId.remove(staleId);
+      }
+    });
+  }
+
+  void _watchLatestChatMessage(String sosId, String currentUserId) {
+    final sub = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(sosId)
+        .collection('messages')
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen((snapshot) async {
+      if (!mounted || snapshot.docs.isEmpty) {
+        return;
+      }
+
+      final latest = snapshot.docs.first;
+      final latestId = latest.id;
+
+      if (!_primedChatSosIds.contains(sosId)) {
+        _primedChatSosIds.add(sosId);
+        _lastSeenChatMessageIdBySosId[sosId] = latestId;
+        return;
+      }
+
+      if (_lastSeenChatMessageIdBySosId[sosId] == latestId) {
+        return;
+      }
+      _lastSeenChatMessageIdBySosId[sosId] = latestId;
+
+      final isEnabled = _chatNotificationPreferenceBySosId[sosId] != false;
+      if (!isEnabled) {
+        return;
+      }
+
+      final data = latest.data();
+      final senderUid = (data['senderUid'] as String?)?.trim() ?? '';
+      final isAi = data['isAi'] == true || senderUid == 'rescuelink_ai';
+      final isSystem =
+          data['isSystem'] == true || (data['type'] as String?) == 'system';
+      if (senderUid.isEmpty || senderUid == currentUserId || isAi || isSystem) {
+        return;
+      }
+
+      final senderName =
+          ((data['senderName'] as String?)?.trim().isNotEmpty ?? false)
+          ? (data['senderName'] as String).trim()
+          : 'Participant';
+      final text = (data['text'] as String?)?.trim() ?? '';
+      final preview = text.isEmpty
+          ? 'Sent an attachment'
+          : (text.length > 120 ? '${text.substring(0, 117)}...' : text);
+
+      await NotificationService.showChatMessageAlert(
+        title: 'New message in group chat',
+        body: '$senderName: $preview',
+        chatSosId: sosId,
+      );
+    });
+
+    _openChatMessageSubs[sosId] = sub;
+  }
+
+  void _stopOpenAppChatNotificationWatchers() {
+    _openChatHeadsSub?.cancel();
+    _openChatHeadsSub = null;
+
+    for (final sub in _openChatMessageSubs.values) {
+      sub.cancel();
+    }
+    _openChatMessageSubs.clear();
+    _chatNotificationPreferenceBySosId.clear();
+    _primedChatSosIds.clear();
+    _lastSeenChatMessageIdBySosId.clear();
+    _chatWatcherUserId = null;
   }
 
   /// Handle SOS button press
@@ -216,214 +357,35 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final authProvider = context.read<AuthProvider>();
-      final crisisProvider = context.read<CrisisProvider>();
-      final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
-      final locationProvider = context.read<LocationProvider>();
-      final responderProvider = context.read<ResponderProvider>();
-      final settings = context.read<AppSettingsProvider>();
-      final commsProvider = context.read<CommsProvider>();
-
-      if (settings.sosFlashEnabled) {
-        await _pulseFlash();
-      }
-
-      if (!locationProvider.hasLocation) {
-        _showSnackBar('Requesting your location...');
-        await locationProvider.refreshLocationStatus(fetchLocation: true);
-      }
-
-      if (!locationProvider.hasLocation || authProvider.currentUser == null) {
-        _showSnackBar('Unable to determine location. Please try again.');
-        return;
-      }
-
-      await responderProvider.fetchResponders();
-
-      // Update user location
-      authProvider.updateUserLocation(
-        locationProvider.latitude!,
-        locationProvider.longitude!,
+      final sosService = SosService();
+      
+      // Execute the SOS flow via the service
+      final requestId = await sosService.triggerSos(
+        context,
+        customMessage: _emergencyContextController.text.trim(),
+        imageFile: _selectedImage,
+        voiceAudioPath: _voiceAudioPath,
+        forceCritical: _forceCriticalSeverity,
       );
 
-      final typedMessage = _emergencyContextController.text.trim();
-      String transcript = _voiceTranscript?.trim() ?? '';
-
-      final baseMessageParts = <String>[];
-      if (typedMessage.isNotEmpty) {
-        baseMessageParts.add(typedMessage);
-      }
-      if (transcript.isNotEmpty && transcript != typedMessage) {
-        baseMessageParts.add('Voice note: $transcript');
-      }
-
-      final aiMessageParts = List<String>.from(baseMessageParts);
-      if (_selectedImage != null) {
-        aiMessageParts.add('Photo evidence selected');
-        final fileName = _selectedImage!.name.trim();
-        if (fileName.isNotEmpty) {
-          aiMessageParts.add('Photo filename: $fileName');
-        }
-      }
-
-      final aiMessage = aiMessageParts.isEmpty
-          ? 'Potential emergency needs urgent support.'
-          : aiMessageParts.join(' ');
-
-      if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty) {
-        final currentWordCount = transcript
-            .split(RegExp(r'\s+'))
-            .where((word) => word.trim().isNotEmpty)
-            .length;
-        final shouldUseCloudAssist = currentWordCount < 3;
-        if (shouldUseCloudAssist) {
-          final audioBytes = await XFile(_voiceAudioPath!).readAsBytes();
-          final cloudResult = await _transcriptionService.transcribeWithCloud(
-            audioBytes: audioBytes,
-            languageCode: _speechLocaleForLanguage(
-                context.read<AppSettingsProvider>().languageCode),
-            alternativeLanguageCodes: _speechAlternatives(
-              _speechLocaleForLanguage(
-                  context.read<AppSettingsProvider>().languageCode),
-            ),
-          );
-          if (cloudResult != null && cloudResult.transcript.trim().isNotEmpty) {
-            transcript = cloudResult.transcript.trim();
-            _voiceTranscript = transcript;
-            _transcriptionProvider = cloudResult.provider;
-            _transcriptionConfidence = cloudResult.confidence;
-            if (_emergencyContextController.text.trim().isEmpty) {
-              _emergencyContextController.text = transcript;
-              _emergencyContextController.selection =
-                  TextSelection.fromPosition(
-                TextPosition(offset: _emergencyContextController.text.length),
-              );
-            }
-          }
-        }
-      }
-
-      final aiInput =
-          'SOS triggered by ${authProvider.currentUser!.displayName} near '
-          '${locationProvider.latitude!.toStringAsFixed(4)}, '
-          '${locationProvider.longitude!.toStringAsFixed(4)}. '
-          '${_emergencyContextController.text.trim().isEmpty ? 'Potential emergency needs urgent support.' : _emergencyContextController.text.trim()}'
-          'Human report: $aiMessage';
-
-      Uint8List? imageBytesForAi;
-      String? imageMimeTypeForAi;
-      if (_selectedImage != null) {
-        try {
-          imageBytesForAi = await _selectedImage!.readAsBytes();
-          imageMimeTypeForAi = _contentTypeForName(_selectedImage!.name);
-        } catch (_) {
-          imageBytesForAi = null;
-          imageMimeTypeForAi = null;
-        }
-      }
-
-      await crisisProvider.classifyCrisis(
-        aiInput,
-        availableSkills: responderProvider.responders
-            .map((responder) => responder.skillsArea)
-            .toSet()
-            .toList(),
-        forceOffline: commsProvider.forceOfflineAi,
-        imageBytes: imageBytesForAi,
-        imageMimeType: imageMimeTypeForAi,
-      );
-
-      String? attachmentUrl;
-      try {
-        attachmentUrl =
-            await _uploadAttachmentIfNeeded(authProvider.currentUser!.id);
-      } catch (e) {
-        attachmentUrl = null;
-        _showSnackBar('Photo upload failed: ${e.toString()}');
-      }
-      _attachmentType = attachmentUrl != null ? 'image' : null;
-
-      String? voiceAudioUrl;
-      if (_includeVoiceClip) {
-        try {
-          voiceAudioUrl =
-              await _uploadVoiceAudioIfNeeded(authProvider.currentUser!.id);
-        } catch (e) {
-          voiceAudioUrl = null;
-          _showSnackBar('Audio attach failed: ${e.toString()}');
-        }
-      }
-
-      final originalMessageParts = List<String>.from(baseMessageParts);
-      if (attachmentUrl != null) {
-        originalMessageParts.add('Photo attached');
-      }
-      if (voiceAudioUrl != null) {
-        originalMessageParts.add('Voice clip attached');
-      }
-      final originalMessage = originalMessageParts.isEmpty
-          ? 'Potential emergency needs urgent support.'
-          : originalMessageParts.join(' ');
-
-      // Find nearby responders within 5km
-      responderProvider.findNearbyResponders(
-        locationProvider.latitude!,
-        locationProvider.longitude!,
-        5.0,
-        requiredSkill: crisisProvider.latestAnalysis?.recommendedSkill,
-      );
-
-      final analysis = crisisProvider.latestAnalysis;
-      final finalSeverity = _forceCriticalSeverity
-          ? 'critical'
-          : (analysis?.severity ?? 'medium');
-      final requestId = await emergencyRequestProvider.createRequest(
-        requesterUserId: authProvider.currentUser!.id,
-        requesterName: authProvider.currentUser!.displayName,
-        latitude: locationProvider.latitude!,
-        longitude: locationProvider.longitude!,
-        category: analysis?.category ?? 'General Emergency',
-        severity: finalSeverity,
-        originalMessage: originalMessage,
-        voiceTranscript: transcript.isEmpty ? null : transcript,
-        voiceAudioUrl: voiceAudioUrl,
-        voiceAudioType: voiceAudioUrl != null ? 'audio/wav' : null,
-        attachmentUrl: attachmentUrl,
-        attachmentType: _attachmentType,
-        summary: analysis?.summary ?? 'SOS triggered by user',
-        recommendedSkill: analysis?.recommendedSkill ?? 'General Support',
-        suggestedActions: analysis?.suggestedActions ?? const <String>[],
-        aiConfidence: analysis?.confidence,
-        humanReviewRecommended: analysis?.humanReviewRecommended ?? false,
-        forcedCriticalByUser: _forceCriticalSeverity,
-      );
-
-      _currentSosRequestId = requestId;
-
-      final cloudWriteSucceeded = requestId != null;
-      _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
-        cloudWriteSucceeded: cloudWriteSucceeded,
-        hasNearbyResponders: responderProvider.nearbyResponders.isNotEmpty,
-      );
-
-      if (responderProvider.error != null) {
-        _showSnackBar(responderProvider.error!);
-      }
-      if (emergencyRequestProvider.error != null) {
-        _showSnackBar(emergencyRequestProvider.error!);
-      }
-
-      if (settings.notificationsEnabled) {
-        await NotificationService.showSosAlert(
-          title: 'SOS Triggered',
-          body:
-              'Alert sent near ${locationProvider.latitude!.toStringAsFixed(3)}, ${locationProvider.longitude!.toStringAsFixed(3)}',
+      if (requestId != null) {
+        _currentSosRequestId = requestId;
+        
+        // Track the route (for UI feedback)
+        final commsProvider = context.read<CommsProvider>();
+        final responderProvider = context.read<ResponderProvider>();
+        _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
+          settings: context.read<AppSettingsProvider>(),
+          cloudWriteSucceeded: true,
+          hasNearbyResponders: responderProvider.nearbyResponders.isNotEmpty,
         );
+        
+        _showSOSConfirmation();
+      } else {
+        _showSnackBar('SOS could not complete. Check permissions or network.');
       }
-
-      _showSOSConfirmation();
-    } catch (_) {
-      _showSnackBar('SOS could not complete. Please try again.');
+    } catch (e) {
+      _showSnackBar('SOS error: ${e.toString()}');
     } finally {
       if (mounted) {
         setState(() {
@@ -432,6 +394,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
   }
+
+  // Note: The previous logic (lines 354-574) is now encapsulated in SosService.
 
   Future<void> _pulseFlash() async {
     try {
@@ -445,6 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Show SOS confirmation dialog
   void _showSOSConfirmation() {
+    final settings = context.read<AppSettingsProvider>();
     final crisisProvider = context.read<CrisisProvider>();
     final locationProvider = context.read<LocationProvider>();
     final responderProvider = context.read<ResponderProvider>();
@@ -460,7 +425,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Icon(Icons.check_circle, color: Colors.green, size: 28),
             const SizedBox(width: 8),
-            const Expanded(child: Text('✓ SOS Received')),
+            Expanded(child: Text(settings.t('status_sos_received'))),
           ],
         ),
         content: SingleChildScrollView(
@@ -503,7 +468,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8.0),
                   child: Text(
-                    'ℹ️ No nearby responders yet. Use emergency call/SMS as secondary backup.',
+                    'ℹ️ ${settings.t('no_nearby_responders_hint')}',
                     style: Theme.of(context)
                         .textTheme
                         .bodyMedium
@@ -513,30 +478,30 @@ class _HomeScreenState extends State<HomeScreen> {
               if (analysis != null) ...[
                 const SizedBox(height: 16),
                 Text(
-                  'Analysis Results',
+                  settings.t('analysis_results'),
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Category: ${analysis.category}',
+                  '${settings.t('category_label')}: ${settings.localizedCrisisCategory(analysis.category)}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 Text(
-                  'Severity: ${analysis.severity}',
+                  '${settings.t('severity_label')}: ${analysis.severity}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 if (_forceCriticalSeverity)
                   Text(
-                    'Manual override: CRITICAL',
+                    settings.t('manual_override_critical'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.red.shade800,
                           fontWeight: FontWeight.w700,
                         ),
                   ),
                 Text(
-                  'Skill Match: ${analysis.recommendedSkill}',
+                  '${settings.t('skill_match')}: ${settings.localizedSkill(analysis.recommendedSkill)}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 if (analysis.confidence > 0)
@@ -546,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 if (analysis.humanReviewRecommended)
                   Text(
-                    'Human review recommended',
+                    settings.t('human_review_recommended'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.orange.shade800,
                           fontWeight: FontWeight.w600,
@@ -555,7 +520,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (analysis.suggestedActions.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'Recommended Actions:',
+                    settings.t('recommended_actions'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -572,7 +537,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
                     child: Text(
-                      '🔌 Offline Mode (AI Fallback Active)',
+                      '🔌 ${settings.t('offline_mode_active')}',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -581,12 +546,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
               ],
               const SizedBox(height: 8),
-              Text(
-                'Route: $_lastDeliveryRoute',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey[600],
-                    ),
-              ),
+              if (_lastDeliveryRoute.isNotEmpty)
+                Text(
+                  '${settings.t('label_route')}: $_lastDeliveryRoute',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey[600],
+                      ),
+                ),
             ],
           ),
         ),
@@ -607,7 +573,7 @@ class _HomeScreenState extends State<HomeScreen> {
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.close),
-            label: const Text('Cancel SOS'),
+            label: Text(context.read<AppSettingsProvider>().t('button_cancel_sos')),
           ),
           const SizedBox(width: 8),
           // View Map button
@@ -621,7 +587,7 @@ class _HomeScreenState extends State<HomeScreen> {
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.map),
-            label: const Text('View Map'),
+            label: Text(context.read<AppSettingsProvider>().t('button_view_map')),
           ),
           if (_currentSosRequestId != null) ...[
             const SizedBox(width: 8),
@@ -635,7 +601,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 foregroundColor: Colors.white,
               ),
               icon: const Icon(Icons.chat_bubble_outline),
-              label: const Text('Open Chat'),
+              label: Text(context.read<AppSettingsProvider>().t('button_open_chat')),
             ),
           ],
           if (responderProvider.nearbyResponders.isEmpty) ...[
@@ -651,14 +617,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 foregroundColor: Colors.white,
               ),
               icon: const Icon(Icons.call),
-              label: const Text('Call 112'),
+              label: Text(context.read<AppSettingsProvider>().t('button_call_emergency')),
             ),
           ],
         ],
       ),
     );
 
-    _announce('SOS activated. Nearby responders have been notified.');
+    _announce(context.read<AppSettingsProvider>().t('status_sos_activated'));
   }
 
   /// Show snackbar message
@@ -739,7 +705,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final sosId = _currentSosRequestId;
 
     if (user == null || sosId == null) {
-      _showSnackBar('Chat is not ready yet.');
+      _showSnackBar(context.read<AppSettingsProvider>().t('status_chat_not_ready'));
       return;
     }
 
@@ -802,8 +768,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
 
               // Title
-              const Text(
-                "Select Language",
+              Text(
+                settings.t('home_select_language'),
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -812,8 +778,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 4),
 
-              const Text(
-                "Choose your preferred language",
+              Text(
+                settings.t('home_choose_preferred_language'),
                 style: TextStyle(color: Colors.grey),
               ),
 
@@ -964,8 +930,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Chip(
                   label: Text(
                     authProvider.isAnonymousUser
-                        ? 'Anonymous Session'
-                        : 'Registered Account',
+                        ? context.read<AppSettingsProvider>().t('account_anonymous_session')
+                        : context.read<AppSettingsProvider>().t('account_registered_account'),
                   ),
                 ),
               ),
@@ -981,7 +947,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           _openAuthScreen();
                         },
                         icon: const Icon(Icons.login),
-                        label: const Text('Sign In / Create Account'),
+                        label: Text(context.read<AppSettingsProvider>().t('account_signin_create')),
                       ),
                     ),
                   if (!authProvider.isAnonymousUser)
@@ -993,7 +959,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           await _logoutRegisteredUser();
                         },
                         icon: const Icon(Icons.logout),
-                        label: const Text('Sign Out'),
+                        label: Text(
+                          context.read<AppSettingsProvider>().t('button_sign_out')),
                       ),
                     ),
                   if (user.isResponder)
@@ -1005,7 +972,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           _openResponderRequests();
                         },
                         icon: const Icon(Icons.list_alt),
-                        label: const Text('People Needing Help'),
+                        label: Text(
+                          context.read<AppSettingsProvider>().t('button_people_needing_help')),
                       ),
                     ),
                 ],
@@ -1036,7 +1004,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             SwitchListTile.adaptive(
                               contentPadding: EdgeInsets.zero,
-                              title: const Text('Responder Online'),
+                              title: Text(
+                                context.read<AppSettingsProvider>().t('label_responder_online')),
                               value: isAvailable,
                               onChanged: _toggleAvailability,
                             ),
@@ -1047,8 +1016,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   Navigator.of(sheetContext).pop();
                                   await _deregisterResponder();
                                 },
-                                child: const Text(
-                                  'De-register as responder',
+                                child: Text(
+                                  context.read<AppSettingsProvider>().t('responder_deregister'),
                                   style: TextStyle(color: Colors.red),
                                 ),
                               ),
@@ -1109,12 +1078,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
-                          children: const [
-                            Icon(Icons.accessibility_new, color: Colors.white),
-                            SizedBox(width: 10),
+                          children: [
+                            const Icon(Icons.accessibility_new, color: Colors.white),
+                            const SizedBox(width: 10),
                             Text(
-                              'Accessibility',
-                              style: TextStyle(
+                              settings.t('title_accessibility'),
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -1128,7 +1097,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                       // 🔧 Settings Cards
                       _buildSwitchCard(
-                        title: 'Haptic vibration for SOS',
+                        title: settings.t('label_haptics'),
                         icon: Icons.vibration,
                         value: settings.hapticsEnabled,
                         onChanged: (v) {
@@ -1138,8 +1107,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
 
                       _buildSwitchCard(
-                        title: 'Flash light pulse on SOS',
-                        subtitle: 'Uses device torch if available',
+                        title: settings.t('label_flashlight'),
+                        subtitle: settings.t('label_flashlight_hint'),
                         icon: Icons.flashlight_on,
                         value: settings.sosFlashEnabled,
                         onChanged: (v) {
@@ -1149,7 +1118,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
 
                       _buildSwitchCard(
-                        title: 'High contrast mode',
+                        title: settings.t('label_high_contrast'),
                         icon: Icons.contrast,
                         value: settings.highContrastEnabled,
                         onChanged: (v) {
@@ -1159,8 +1128,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
 
                       _buildSwitchCard(
-                        title: 'Enable notifications',
-                        subtitle: 'Local SOS status alerts',
+                        title: settings.t('label_notifications'),
+                        subtitle: settings.t('label_notifications_hint'),
                         icon: Icons.notifications_active,
                         value: settings.notificationsEnabled,
                         onChanged: (value) async {
@@ -1169,12 +1138,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                 await NotificationService.requestPermissions();
                             settings.setNotificationsEnabled(granted);
 
+                            if (granted) {
+                              _startOpenAppChatNotificationWatchers();
+                            } else {
+                              _stopOpenAppChatNotificationWatchers();
+                            }
+
                             if (!granted && mounted) {
                               _showSnackBar(
-                                  'Notification permission not granted.');
+                                  settings.t('notification_permission_not_granted'));
                             }
                           } else {
                             settings.setNotificationsEnabled(false);
+                            _stopOpenAppChatNotificationWatchers();
                           }
                           setModalState(() {});
                         },
@@ -1196,7 +1172,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 const Icon(Icons.text_fields,
                                     color: Colors.red),
                                 const SizedBox(width: 8),
-                                const Expanded(child: Text('Text Size')),
+                                Expanded(child: Text(settings.t('label_text_size'))),
                                 Text(
                                   '${(settings.textScaleFactor * 100).round()}%',
                                   style: const TextStyle(
@@ -1228,8 +1204,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 },
                                 icon: const Icon(Icons.restart_alt,
                                     color: Colors.red),
-                                label: const Text(
-                                  'Reset',
+                                label: Text(
+                                  settings.t('button_reset'),
                                   style: TextStyle(color: Colors.red),
                                 ),
                               ),
@@ -1254,12 +1230,13 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             onPressed: () {
                               _announce(
-                                'Accessibility test announcement. SOS button is centered below information cards.',
+                                settings.t('accessibility_announcement_text'),
                               );
-                              _showSnackBar('Screen reader announcement sent.');
+                              _showSnackBar(settings.t('accessibility_announcement_sent'));
                             },
                             icon: const Icon(Icons.record_voice_over),
-                            label: const Text('Voice Test'),
+                            label: Text(
+                              context.read<AppSettingsProvider>().t('button_voice_test')),
                           ),
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
@@ -1269,11 +1246,12 @@ class _HomeScreenState extends State<HomeScreen> {
                             onPressed: () async {
                               await _pulseFlash();
                               if (mounted) {
-                                _showSnackBar('Flash pulse test completed.');
+                                _showSnackBar(settings.t('flash_test_completed'));
                               }
                             },
                             icon: const Icon(Icons.flashlight_on),
-                            label: const Text('Flash Test'),
+                            label: Text(
+                              context.read<AppSettingsProvider>().t('button_flash_test')),
                           ),
                         ],
                       ),
@@ -1333,12 +1311,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
-                        children: const [
-                          Icon(Icons.wifi_tethering, color: Colors.white),
-                          SizedBox(width: 10),
+                        children: [
+                          const Icon(Icons.wifi_tethering, color: Colors.white),
+                          const SizedBox(width: 10),
                           Text(
-                            'Comms Simulation',
-                            style: TextStyle(
+                            context.read<AppSettingsProvider>().t('comms_simulation_title'),
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -1369,11 +1347,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
                           // Selected item display
                           selectedItemBuilder: (context) {
+                            final settings = context.read<AppSettingsProvider>();
                             return CommsMode.values.map((mode) {
                               return Row(
                                 children: [
                                   Text(
-                                    comms.modeLabel(mode),
+                                    comms.modeLabel(mode, settings),
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -1384,11 +1363,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
 
                           items: CommsMode.values.map((mode) {
+                            final settings = context.read<AppSettingsProvider>();
                             return DropdownMenuItem<CommsMode>(
                               value: mode,
                               child: Row(
                                 children: [
-                                  Text(comms.modeLabel(mode)),
+                                  Text(comms.modeLabel(mode, settings)),
                                 ],
                               ),
                             );
@@ -1408,7 +1388,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     // 🔧 Switch Cards
                     _buildCommsSwitch(
-                      title: 'Simulate tower failure',
+                      title: context.read<AppSettingsProvider>().t('comms_simulate_tower_failure'),
                       icon: Icons.signal_cellular_off,
                       value: comms.simulateTowerFailure,
                       onChanged: (v) {
@@ -1418,8 +1398,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
 
                     _buildCommsSwitch(
-                      title: 'Device supports satellite',
-                      subtitle: 'Simulated capability',
+                      title: context.read<AppSettingsProvider>().t('comms_device_supports_satellite'),
+                      subtitle: context.read<AppSettingsProvider>().t('comms_simulated_capability'),
                       icon: Icons.satellite_alt,
                       value: comms.deviceSupportsSatellite,
                       onChanged: (v) {
@@ -1440,13 +1420,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Icon(Icons.info_outline, color: Colors.red),
-                          SizedBox(width: 10),
+                        children: [
+                          const Icon(Icons.info_outline, color: Colors.red),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'This simulation allows testing disaster or lockdown connectivity fallback without real mesh or satellite hardware.',
-                              style: TextStyle(fontSize: 13),
+                              context.read<AppSettingsProvider>().t('comms_simulation_info'),
+                              style: const TextStyle(fontSize: 13),
                             ),
                           ),
                         ],
@@ -1874,6 +1854,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _responderPollingTimer?.cancel();
+    _stopOpenAppChatNotificationWatchers();
     _speechToText.stop();
     _audioRecorder.dispose();
     _voicePreviewCompleteSub?.cancel();
@@ -1917,12 +1898,12 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.accessibility_new),
             onPressed: _showAccessibilitySheet,
-            tooltip: 'Accessibility',
+            tooltip: context.read<AppSettingsProvider>().t('title_accessibility'),
           ),
           IconButton(
             icon: const Icon(Icons.wifi_tethering),
             onPressed: _showCommsSimulationSheet,
-            tooltip: 'Comms Simulation',
+            tooltip: context.read<AppSettingsProvider>().t('comms_simulation_title'),
           ),
         ],
       ),
@@ -1976,7 +1957,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           icon: const Icon(Icons.health_and_safety),
                           label: Text(
                             authProvider.currentUser?.isResponder == true
-                                ? 'Responder Dashboard'
+                                ? settings.t('button_responder_dashboard')
                                 : settings.t('become_responder'),
                           ),
                         ),
@@ -1989,9 +1970,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         maxLines: 3,
                         cursorColor: Colors.red,
                         decoration: InputDecoration(
-                          labelText: 'Emergency details (optional)',
+                          labelText: settings.t('label_emergency_details_optional'),
                           hintText:
-                              'Example: elderly person fell, flood nearby, child missing, no transport',
+                              settings.t('hint_emergency_details_example'),
                           filled: true,
                           fillColor: Colors.red.shade50,
                           border: OutlineInputBorder(
@@ -2034,8 +2015,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             IconButton.filledTonal(
                               tooltip: _isTranscribing
-                                  ? 'Stop voice-to-text'
-                                  : 'Voice to text',
+                                  ? settings.t('tooltip_stop_voice_to_text')
+                                  : settings.t('tooltip_voice_to_text'),
                               onPressed:
                                   _speechReady ? _toggleVoiceInput : null,
                               icon: Icon(
@@ -2043,8 +2024,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             IconButton.filledTonal(
                               tooltip: _isRecordingClip
-                                  ? 'Stop voice clip'
-                                  : 'Record voice clip',
+                                  ? settings.t('tooltip_stop_voice_clip')
+                                  : settings.t('tooltip_record_voice_clip'),
                               onPressed: _toggleVoiceClipRecording,
                               icon: Icon(
                                 _isRecordingClip
@@ -2054,8 +2035,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             IconButton.filledTonal(
                               tooltip: _isPreviewPlaying
-                                  ? 'Stop preview'
-                                  : 'Play preview',
+                                  ? settings.t('tooltip_stop_preview')
+                                  : settings.t('tooltip_play_preview'),
                               onPressed: (_voiceAudioPath != null &&
                                       _voiceAudioPath!.isNotEmpty)
                                   ? _toggleLocalVoicePreview
@@ -2101,13 +2082,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                             IconButton.filledTonal(
-                              tooltip: 'Capture photo',
+                              tooltip: settings.t('tooltip_capture_photo'),
                               onPressed: _pickCameraImage,
                               icon: const Icon(Icons.camera_alt),
                             ),
                             FilterChip(
                               selected: _forceCriticalSeverity,
-                              label: const Text('Force Critical'),
+                              label: Text(context.read<AppSettingsProvider>().t('button_force_critical')),
                               selectedColor: Colors.red.shade100,
                               checkmarkColor: Colors.red.shade800,
                               onSelected: (value) {
@@ -2124,8 +2105,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         alignment: Alignment.centerLeft,
                         child: Text(
                           commsProvider.forceOfflineAi
-                              ? 'Visual AI disabled (Local fallback)'
-                              : 'Visual AI enabled (Gemini multimodal)',
+                              ? settings.t('status_visual_ai_disabled')
+                              : settings.t('status_visual_ai_enabled'),
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: commsProvider.forceOfflineAi
@@ -2152,8 +2133,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         alignment: Alignment.centerLeft,
                         child: Text(
                           _cloudTranscriptionEnabled
-                              ? 'Transcription: Cloud assist enabled'
-                              : 'Transcription: On-device only (free mode)',
+                              ? settings.t('status_transcription_cloud_enabled')
+                              : settings.t('status_transcription_ondevice_free'),
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: _cloudTranscriptionEnabled
@@ -2174,8 +2155,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               avatar: const Icon(Icons.subtitles, size: 18),
                               label: Text(
                                 _transcriptionConfidence == null
-                                    ? 'Transcript ready'
-                                    : 'Transcript ${(_transcriptionConfidence! * 100).toStringAsFixed(0)}%',
+                                    ? settings.t('status_transcript_ready')
+                                    : settings.t('status_transcript_percent').replaceAll('{pct}', '${(_transcriptionConfidence! * 100).toStringAsFixed(0)}'),
                               ),
                             ),
                             if (_transcriptionProvider.isNotEmpty)
@@ -2204,8 +2185,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     fileName: _selectedImage!.name.isEmpty
                                         ? 'photo_attachment.jpg'
                                         : _selectedImage!.name,
-                                    fileKind: 'Photo attachment',
-                                    semanticsLabel: 'View attached photo',
+                                    fileKind: settings.t('attachment_photo'),
+                                    semanticsLabel: settings.t('semantics_view_attached_photo'),
                                     onOpen: _previewSelectedPhoto,
                                     onRemove: _removePhotoAttachment,
                                   ),
@@ -2218,8 +2199,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   _buildAttachmentCard(
                                     icon: Icons.graphic_eq_rounded,
                                     fileName: 'voice_clip.wav',
-                                    fileKind: 'Voice attachment',
-                                    semanticsLabel: 'Play attached voice clip',
+                                    fileKind: settings.t('attachment_voice'),
+                                    semanticsLabel: settings.t('semantics_play_attached_voice_clip'),
                                     onOpen: _toggleLocalVoicePreview,
                                     onRemove: () {
                                       _removeVoiceAttachment();
@@ -2267,7 +2248,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             Text(
                               commsProvider.forceOfflineAi
                                   ? 'Local Fallback'
-                                  : 'Powered by Gemini',
+                                  : context.read<AppSettingsProvider>().t('button_powered_by_gemini'),
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall

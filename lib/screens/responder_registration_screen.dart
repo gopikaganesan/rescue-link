@@ -5,6 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/models/responder_model.dart';
+import '../core/providers/app_settings_provider.dart';
 import '../core/providers/auth_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
@@ -58,6 +59,42 @@ class _ResponderRegistrationScreenState
     'Logistics Provider',
     'Shelter Host',
   ];
+
+  static const Map<String, String> _skillTranslationKeys = {
+    'Medical Emergency': 'responder_skill_medical_emergency',
+    'Fire & Rescue': 'responder_skill_fire_and_rescue',
+    'Search & Rescue': 'responder_skill_search_and_rescue',
+    'Elderly Assist': 'responder_skill_elderly_assist',
+    'Women Safety': 'responder_skill_women_safety',
+    'Child Safety': 'responder_skill_child_safety',
+    'Shelter & Evacuation': 'responder_skill_shelter_and_evacuation',
+    'Food & Water Supply': 'responder_skill_food_and_water_supply',
+    'Essential Medicines': 'responder_skill_essential_medicines',
+    'Mobility Support': 'responder_skill_mobility_support',
+    'Communication Relay': 'responder_skill_communication_relay',
+    'Logistics & Transport': 'responder_skill_logistics_and_transport',
+    'General Support': 'responder_skill_general_support',
+  };
+
+  static const Map<String, String> _typeTranslationKeys = {
+    'Community Volunteer': 'responder_type_community_volunteer',
+    'Medical Professional': 'responder_type_medical_professional',
+    'Firefighter': 'responder_type_firefighter',
+    'Police': 'responder_type_police',
+    'Off-duty Authority': 'responder_type_off_duty_authority',
+    'Civil Defense': 'responder_type_civil_defense',
+    'NGO Worker': 'responder_type_ngo_worker',
+    'Logistics Provider': 'responder_type_logistics_provider',
+    'Shelter Host': 'responder_type_shelter_host',
+  };
+
+  String _skillLabel(BuildContext context, String skill) {
+    return context.read<AppSettingsProvider>().t(_skillTranslationKeys[skill] ?? skill);
+  }
+
+  String _responderTypeLabel(BuildContext context, String type) {
+    return context.read<AppSettingsProvider>().t(_typeTranslationKeys[type] ?? type);
+  }
 
   @override
   void initState() {
@@ -128,15 +165,17 @@ class _ResponderRegistrationScreenState
   }
 
   Future<void> _uploadIdDocument() async {
+    final settings = context.read<AppSettingsProvider>();
+
     if (_selectedFile == null) {
-      _showMessage('Please select a document first');
+      _showMessage(settings.t('prompt_select_document_first'));
       return;
     }
 
     final authProvider = context.read<AuthProvider>();
     final user = authProvider.currentUser;
     if (user == null) {
-      _showMessage('Please sign in first');
+      _showMessage(settings.t('prompt_sign_in_first'));
       return;
     }
 
@@ -159,11 +198,12 @@ class _ResponderRegistrationScreenState
       });
 
       if (mounted) {
-        _showMessage('Document uploaded successfully');
+        _showMessage(settings.t('document_uploaded_successfully'));
       }
     } catch (e) {
       if (mounted) {
-        _showMessage('Failed to upload document: ${e.toString()}');
+        final errorText = settings.t('error_document_upload_failed').replaceAll('{error}', e.toString());
+        _showMessage(errorText);
       }
     } finally {
       if (mounted) {
@@ -186,28 +226,29 @@ class _ResponderRegistrationScreenState
       return;
     }
 
+    final settings = context.read<AppSettingsProvider>();
+    final authProvider = context.read<AuthProvider>();
+    final locationProvider = context.read<LocationProvider>();
+    final responderProvider = context.read<ResponderProvider>();
+
     setState(() {
       _isSubmitting = true;
     });
 
     try {
-      final authProvider = context.read<AuthProvider>();
-      final locationProvider = context.read<LocationProvider>();
-      final responderProvider = context.read<ResponderProvider>();
-
       final currentUser = authProvider.currentUser;
       if (currentUser == null) {
-        _showMessage('Please sign in first.');
+        _showMessage(settings.t('prompt_sign_in_first'));
         return;
       }
 
       if (!locationProvider.hasLocation) {
-        _showMessage('Getting your location...');
+        _showMessage(settings.t('prompt_getting_location'));
         await locationProvider.getCurrentLocation();
       }
 
       if (!locationProvider.hasLocation) {
-        _showMessage('Location is required to register as responder.');
+        _showMessage(settings.t('prompt_location_required'));
         return;
       }
     
@@ -240,10 +281,11 @@ class _ResponderRegistrationScreenState
         return;
       }
 
-      _showMessage('You are now registered as a responder.');
+      _showMessage(context.read<AppSettingsProvider>().t('snackbar_responder_registered'));
       Navigator.pop(context);
     } catch (e) {
-      _showMessage('Registration error: ${e.toString()}');
+      final errorText = context.read<AppSettingsProvider>().t('error_registration').replaceAll('{error}', e.toString());
+      _showMessage(errorText);
     } finally {
       if (mounted) {
         setState(() {
@@ -261,9 +303,11 @@ class _ResponderRegistrationScreenState
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.read<AppSettingsProvider>();
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Responder Registration'),
+        title: Text(settings.t('title_responder_registration')),
       ),
       body: SafeArea(
         child: Padding(
@@ -273,22 +317,22 @@ class _ResponderRegistrationScreenState
             child: ListView(
               children: [
                 Text(
-                  'Join local emergency response',
+                  settings.t('responder_registration_headline'),
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Your profile helps RescueLink find and match you during SOS events.',
+                  settings.t('responder_registration_description'),
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Name and phone are prefilled from your login profile. Add your responder profile so AI can route requests better during crisis and daily care.',
+                  settings.t('responder_registration_profile_help'),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Verification is self-declared for now. Admin review can be added later without slowing down registration.',
+                  settings.t('responder_registration_verification_note'),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Colors.grey[700],
                       ),
@@ -296,13 +340,13 @@ class _ResponderRegistrationScreenState
                 const SizedBox(height: 20),
                 TextFormField(
                   controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Full Name',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: settings.t('label_full_name'),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
-                      return 'Please enter your name';
+                      return settings.t('error_please_enter_name');
                     }
                     return null;
                   },
@@ -311,16 +355,16 @@ class _ResponderRegistrationScreenState
                 TextFormField(
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Phone Number',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: settings.t('label_phone_number'),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
-                      return 'Please enter your phone number';
+                      return settings.t('error_please_enter_phone');
                     }
                     if (value.trim().length < 8) {
-                      return 'Please enter a valid phone number';
+                      return settings.t('error_valid_phone_number');
                     }
                     return null;
                   },
@@ -328,15 +372,15 @@ class _ResponderRegistrationScreenState
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: _selectedSkill,
-                  decoration: const InputDecoration(
-                    labelText: 'Primary Skill',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: settings.t('label_primary_skill'),
+                    border: const OutlineInputBorder(),
                   ),
                   items: _skills
                       .map(
                         (skill) => DropdownMenuItem<String>(
                           value: skill,
-                          child: Text(skill),
+                          child: Text(_skillLabel(context, skill)),
                         ),
                       )
                       .toList(),
@@ -351,15 +395,15 @@ class _ResponderRegistrationScreenState
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: _responderType,
-                  decoration: const InputDecoration(
-                    labelText: 'Responder Type',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: settings.t('label_responder_type'),
+                    border: const OutlineInputBorder(),
                   ),
                   items: _responderTypes
                       .map(
                         (type) => DropdownMenuItem<String>(
                           value: type,
-                          child: Text(type),
+                          child: Text(_responderTypeLabel(context, type)),
                         ),
                       )
                       .toList(),
@@ -374,14 +418,14 @@ class _ResponderRegistrationScreenState
                 const SizedBox(height: 20),
                 // ID Document Upload Section
                 Text(
-                  'ID Document Upload (Optional)',
+                  settings.t('label_id_upload'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Upload your official ID (Passport, Driver License, or National ID) for verification. Accepted formats: PDF, JPG, PNG',
+                  settings.t('responder_registration_id_description'),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Colors.grey[600],
                       ),
@@ -403,9 +447,9 @@ class _ResponderRegistrationScreenState
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Document uploaded successfully'),
+                              Text(settings.t('document_uploaded_successfully')),
                               Text(
-                                _selectedFile?.name ?? 'ID Document',
+                                _selectedFile?.name ?? settings.t('label_document_name'),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
@@ -457,7 +501,9 @@ class _ResponderRegistrationScreenState
                                   )
                                 : const Icon(Icons.cloud_upload),
                             label: Text(
-                              _isUploadingDocument ? 'Uploading...' : 'Upload',
+                              _isUploadingDocument
+                                  ? settings.t('status_uploading')
+                                  : settings.t('button_upload'),
                             ),
                           ),
                         ),
@@ -470,7 +516,7 @@ class _ResponderRegistrationScreenState
                     child: OutlinedButton.icon(
                       onPressed: _pickIdDocument,
                       icon: const Icon(Icons.attach_file),
-                      label: const Text('Select ID Document'),
+                      label: Text(settings.t('button_select_document')),
                     ),
                   ),
                 ],
@@ -485,7 +531,7 @@ class _ResponderRegistrationScreenState
                             width: 22,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Register As Responder'),
+                        : Text(settings.t('button_responder_register')),
                   ),
                 ),
               ],

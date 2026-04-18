@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../core/providers/app_settings_provider.dart';
 import '../services/chat_service.dart';
+import '../widgets/translated_text.dart';
 import 'group_chat_screen.dart';
 
 class ResponderChatListScreen extends StatefulWidget {
@@ -59,13 +62,14 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.read<AppSettingsProvider>();
     final chatService = ChatService();
     final stream = _showAllActiveChats
         ? chatService.watchActiveChats()
         : chatService.watchResponderChats(widget.currentUserId);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Responder Chats')),
+      appBar: AppBar(title: Text(settings.t('title_responder_alerts'))),
       body: Column(
         children: <Widget>[
           Padding(
@@ -74,7 +78,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
               spacing: 8,
               children: <Widget>[
                 ChoiceChip(
-                  label: const Text('All Active'),
+                  label: Text(settings.t('filter_all_active')),
                   selected: _showAllActiveChats,
                   onSelected: (selected) {
                     if (!selected) {
@@ -86,7 +90,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                   },
                 ),
                 ChoiceChip(
-                  label: const Text('Joined By Me'),
+                  label: Text(settings.t('filter_joined_by_me')),
                   selected: !_showAllActiveChats,
                   onSelected: (selected) {
                     if (!selected) {
@@ -110,7 +114,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                 });
               },
               decoration: InputDecoration(
-                hintText: 'Search by SOS ID or message',
+                hintText: settings.t('hint_search_case'),
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchQuery.isEmpty
                     ? null
@@ -133,7 +137,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
               stream: stream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  return const Center(child: Text('Failed to load chats'));
+                  return Center(child: Text(settings.t('error_failed_load_chats')));
                 }
 
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -147,8 +151,8 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                   return Center(
                     child: Text(
                       _showAllActiveChats
-                          ? 'No active chats right now.'
-                          : 'You have not joined any chats yet.',
+                          ? settings.t('status_no_active_chats')
+                          : settings.t('status_no_joined_chats'),
                     ),
                   );
                 }
@@ -212,9 +216,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                 }).toList();
 
                 if (filteredDocs.isEmpty) {
-                  return const Center(
-                    child: Text('No chats match your search.'),
-                  );
+                  return Center(child: Text(settings.t('status_no_matching_chats')));
                 }
 
                 final joinedCount = filteredDocs
@@ -232,12 +234,15 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            'Showing ${filteredDocs.length} chats • Joined $joinedCount',
+                            settings
+                                .t('responder_chat_showing_joined')
+                                .replaceAll('{total}', '${filteredDocs.length}')
+                                .replaceAll('{joined}', '$joinedCount'),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Tap a chat to open conversation. Join happens inside chat if needed.',
+                            settings.t('responder_chat_tap_hint'),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -262,7 +267,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                           );
                           final message = _safeText(
                             overview['message'] as String?,
-                            fallback: 'No SOS message available',
+                            fallback: settings.t('status_no_sos_message_available'),
                             maxLen: 90,
                           );
                           final participantCount = _participantCount(data);
@@ -336,7 +341,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: <Widget>[
                                 const SizedBox(height: 4),
-                                Text(
+                                TranslatedText(
                                   message,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
@@ -346,7 +351,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                                   children: <Widget>[
                                     Expanded(
                                       child: Text(
-                                        'Case ID: $sosId',
+                                        '${context.read<AppSettingsProvider>().t('label_case_id')}: $sosId',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style:
@@ -364,7 +369,9 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                                 if (status != 'active') ...<Widget>[
                                   const SizedBox(height: 4),
                                   Text(
-                                    status.toUpperCase(),
+                                    status == 'cancelled'
+                                        ? context.read<AppSettingsProvider>().t('status_cancelled')
+                                        : status.toUpperCase(),
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelSmall
@@ -449,21 +456,22 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
       return;
     }
 
+    final settings = context.read<AppSettingsProvider>();
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Leave this conversation?'),
-            content: const Text(
-              'This only removes the chat from your list. The SOS chat remains in the database for other participants.',
+            title: Text(settings.t('dialog_leave_conversation_title')),
+            content: Text(
+              settings.t('dialog_leave_conversation_body'),
             ),
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
+                child: Text(settings.t('button_cancel')),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Leave'),
+                child: Text(settings.t('button_leave')),
               ),
             ],
           ),
@@ -487,7 +495,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Conversation removed from your list.')),
+        SnackBar(content: Text(settings.t('snackbar_conversation_removed'))),
       );
     } catch (_) {
       if (!mounted) {

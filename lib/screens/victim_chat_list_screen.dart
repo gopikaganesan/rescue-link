@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../core/providers/app_settings_provider.dart';
 import '../services/chat_service.dart';
 import 'group_chat_screen.dart';
 
@@ -50,8 +52,10 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.read<AppSettingsProvider>();
+
     return Scaffold(
-      appBar: AppBar(title: const Text('My SOS Chats')),
+      appBar: AppBar(title: Text(settings.t('title_my_sos_chats'))),
       body: Column(
         children: <Widget>[
           Padding(
@@ -61,7 +65,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
               runSpacing: 8,
               children: <Widget>[
                 ChoiceChip(
-                  label: const Text('Active'),
+                  label: Text(context.read<AppSettingsProvider>().t('filter_active')),
                   selected: _filter == _VictimChatFilter.active,
                   onSelected: (_) {
                     setState(() {
@@ -70,7 +74,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
                   },
                 ),
                 ChoiceChip(
-                  label: const Text('Cancelled'),
+                  label: Text(context.read<AppSettingsProvider>().t('filter_cancelled')),
                   selected: _filter == _VictimChatFilter.cancelled,
                   onSelected: (_) {
                     setState(() {
@@ -79,7 +83,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
                   },
                 ),
                 ChoiceChip(
-                  label: const Text('All'),
+                  label: Text(context.read<AppSettingsProvider>().t('filter_all')),
                   selected: _filter == _VictimChatFilter.all,
                   onSelected: (_) {
                     setState(() {
@@ -100,7 +104,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
                 });
               },
               decoration: InputDecoration(
-                hintText: 'Search by case ID or message',
+                hintText: context.read<AppSettingsProvider>().t('hint_search_case'),
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchQuery.isEmpty
                     ? null
@@ -138,7 +142,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
               stream: _chatService.watchVictimChats(widget.currentUserId),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  return const Center(child: Text('Failed to load chats'));
+                  return Center(child: Text(context.read<AppSettingsProvider>().t('error_failed_load_chats')));
                 }
 
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -149,10 +153,10 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
                     const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
                 if (docs.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Padding(
-                      padding: EdgeInsets.all(20),
-                      child: Text('No SOS chats found yet.'),
+                      padding: const EdgeInsets.all(20),
+                      child: Text(context.read<AppSettingsProvider>().t('status_no_sos_chats_found')),
                     ),
                   );
                 }
@@ -328,7 +332,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
                                     children: <Widget>[
                                       Expanded(
                                         child: Text(
-                                          'Case ID: $sosId',
+                                          '${settings.t('label_case_id')}: $sosId',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style:
@@ -346,7 +350,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
                                   if (isCancelled) ...<Widget>[
                                     const SizedBox(height: 4),
                                     Text(
-                                      'CANCELLED',
+                                      settings.t('status_cancelled'),
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall
@@ -372,7 +376,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
                                       ),
                                     )
                                   : IconButton(
-                                      tooltip: 'Delete cancelled chat',
+                                      tooltip: settings.t('tooltip_delete_cancelled_chat'),
                                       icon: const Icon(Icons.delete_outline),
                                       onPressed: () =>
                                           _confirmDeleteCancelledChat(sosId: sosId),
@@ -397,17 +401,18 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
   }
 
   Future<void> _confirmDeleteCancelledChat({required String sosId}) async {
+    final settings = context.read<AppSettingsProvider>();
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Delete cancelled chat?'),
-            content: const Text(
-              'This permanently deletes this cancelled SOS chat and all messages from the database.',
+            title: Text(settings.t('dialog_delete_cancelled_chat_title')),
+            content: Text(
+              settings.t('dialog_delete_cancelled_chat_body'),
             ),
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Keep'),
+                child: Text(settings.t('button_keep')),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
@@ -415,7 +420,7 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
                   backgroundColor: Colors.red,
                   foregroundColor: Colors.white,
                 ),
-                child: const Text('Delete'),
+                child: Text(settings.t('button_delete')),
               ),
             ],
           ),
@@ -439,14 +444,14 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cancelled chat deleted.')),
+        SnackBar(content: Text(settings.t('snackbar_cancelled_chat_deleted'))),
       );
     } catch (_) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to delete chat. Please retry.')),
+        SnackBar(content: Text(settings.t('snackbar_failed_delete_chat'))),
       );
     } finally {
       if (mounted) {
