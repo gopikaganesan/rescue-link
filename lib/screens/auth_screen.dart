@@ -75,26 +75,39 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _showLanguagePicker() {
-    final settings = context.read<AppSettingsProvider>();
     showModalBottomSheet<void>(
       context: context,
       builder: (sheetContext) {
-        return ListView(
-          shrinkWrap: true,
-          children: settings.availableLanguageCodes
-              .map(
-                (code) => RadioListTile<String>(
-                  value: code,
-                  title: Text(settings.languageLabel(code)),
-                  onChanged: (value) {
-                    if (value != null) {
-                      settings.setLanguage(value);
-                    }
-                    Navigator.of(sheetContext).pop();
-                  },
+        return Consumer<AppSettingsProvider>(
+          builder: (context, settings, _) {
+            return ListView(
+              shrinkWrap: true,
+              children: [
+                ListTile(
+                  title: Text(settings.t('home_select_language')),
+                  subtitle: Text(settings.t('home_choose_preferred_language')),
                 ),
-              )
-              .toList(),
+                SwitchListTile.adaptive(
+                  value: settings.showAllLanguages,
+                  onChanged: settings.setShowAllLanguages,
+                  title: Text(settings.t('home_show_all_languages')),
+                  subtitle: Text(settings.t('home_show_all_languages_hint')),
+                ),
+                ...settings.availableLanguageCodes.map(
+                  (code) => RadioListTile<String>(
+                    value: code,
+                    title: Text(settings.languageLabel(code)),
+                    onChanged: (value) {
+                      if (value != null) {
+                        settings.setLanguage(value);
+                      }
+                      Navigator.of(sheetContext).pop();
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -140,6 +153,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               controller: _displayNameController,
                               decoration: InputDecoration(
                                 labelText: settings.t('auth_display_name'),
+                                hintText: settings.t('auth_display_name'),
                                 border: OutlineInputBorder(),
                               ),
                               validator: (value) {
@@ -156,6 +170,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               keyboardType: TextInputType.phone,
                               decoration: InputDecoration(
                                 labelText: settings.t('auth_phone_number'),
+                                hintText: settings.t('auth_phone_number'),
                                 border: OutlineInputBorder(),
                               ),
                             ),
@@ -166,6 +181,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       controller: _emailController,
                       decoration: InputDecoration(
                         labelText: settings.t('auth_email'),
+                        hintText: settings.t('auth_email'),
                         border: OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.emailAddress,
@@ -184,6 +200,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       controller: _passwordController,
                       decoration: InputDecoration(
                         labelText: settings.t('auth_password'),
+                        hintText: settings.t('auth_password'),
                         border: OutlineInputBorder(),
                       ),
                       obscureText: true,

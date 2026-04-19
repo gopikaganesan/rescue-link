@@ -264,6 +264,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                           final chatTitle = _humanFriendlyChatTitle(
                             data: data,
                             sosId: sosId,
+                            settings: settings,
                           );
                           final message = _safeText(
                             overview['message'] as String?,
@@ -589,6 +590,7 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
   static String _humanFriendlyChatTitle({
     required Map<String, dynamic> data,
     required String sosId,
+    required AppSettingsProvider settings,
   }) {
     final overview = _asMap(data['sosOverview']);
 
@@ -611,18 +613,32 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
           if (displayName.toLowerCase() == 'victim') {
             break;
           }
+          final localizedName = settings.localizedDisplayName(displayName);
+          final localizedCrisis = settings.localizedCrisisCategory(crisisType);
+          final crisisLabel = localizedCrisis == crisisType
+              ? _toTitleCase(crisisType)
+              : localizedCrisis;
           return crisisType.isNotEmpty
-              ? '${_toTitleCase(crisisType)}: $displayName'
-              : 'Emergency: $displayName';
+              ? '$crisisLabel: $localizedName'
+              : settings
+                  .t('chat_title_emergency_with_name')
+                  .replaceAll('{name}', localizedName);
         }
       }
     }
 
     if (crisisType.isNotEmpty) {
-      return '${_toTitleCase(crisisType)} emergency';
+      final localizedCrisis = settings.localizedCrisisCategory(crisisType);
+      final crisisLabel = localizedCrisis == crisisType
+          ? _toTitleCase(crisisType)
+          : localizedCrisis;
+      return settings
+          .t('chat_title_crisis_emergency')
+          .replaceAll('{crisis}', crisisLabel);
     }
 
-    return 'Emergency chat ${sosId.length >= 6 ? sosId.substring(0, 6) : sosId}';
+    final chatId = sosId.length >= 6 ? sosId.substring(0, 6) : sosId;
+    return settings.t('chat_title_emergency_chat').replaceAll('{id}', chatId);
   }
 
   static String _toTitleCase(String input) {

@@ -104,6 +104,7 @@ class _MapScreenState extends State<MapScreen> {
     double userLng,
     List<ResponderModel> responders,
   ) {
+    final settings = context.read<AppSettingsProvider>();
     final markers = <Marker>[
       Marker(
         point: LatLng(userLat, userLng),
@@ -121,7 +122,7 @@ class _MapScreenState extends State<MapScreen> {
           height: 48,
           child: Tooltip(
             message:
-                '${responder.name}\n${responder.skillsArea} • ${responder.responderType}\n${responder.distanceToLocation(userLat, userLng).toStringAsFixed(1)} km',
+                '${settings.localizedDisplayName(responder.name)}\n${settings.localizedSkill(responder.skillsArea)} • ${settings.localizedResponderType(responder.responderType)}\n${settings.t('map_away_km').replaceAll('{distance}', responder.distanceToLocation(userLat, userLng).toStringAsFixed(1))}',
             child: Icon(
               _iconForSkill(responder.skillsArea),
               color: _colorForSkill(responder.skillsArea),
@@ -139,7 +140,7 @@ class _MapScreenState extends State<MapScreen> {
           width: 52,
           height: 52,
           child: Tooltip(
-            message: widget.targetTitle ?? 'Help Request',
+            message: widget.targetTitle ?? settings.t('map_help_request'),
             child: const Icon(Icons.emergency, color: Colors.deepOrange, size: 38),
           ),
         ),
