@@ -1471,14 +1471,14 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                       horizontal: 16, vertical: 12),
                                   prefixIcon: IconButton(
                                     icon: Icon(_isTranscribing
-                                        ? Icons.hearing_disabled
-                                        : Icons.hearing),
+                                        ? Icons.stop
+                                        : Icons.transcribe),
                                     onPressed: canSendInChat
                                         ? _toggleVoiceTranscription
                                         : null,
                                     tooltip: _isTranscribing
-                                      ? context.read<AppSettingsProvider>().t('chat_stop_dictation')
-                                      : context.read<AppSettingsProvider>().t('chat_start_dictation'),
+                                      ? context.read<AppSettingsProvider>().t('tooltip_stop_voice_to_text')
+                                      : context.read<AppSettingsProvider>().t('tooltip_voice_to_text'),
                                   ),
                                   suffixIcon: Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -2502,7 +2502,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     required String senderName,
     required String text,
   }) async {
-    final safeText = text.trim();
+    final safeText = _cleanAiMessageForVoiceAndSemantics(text);
     if (safeText.isEmpty) {
       return;
     }
@@ -2543,7 +2543,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     final senderLabel = isAiMessage ? '$senderName, AI assistant' : senderName;
     final timeLabel = createdAt == null ? '' : ' at ${_timeText(createdAt)}';
     final parts = <String>['Message from $senderLabel$timeLabel'];
-    final safeText = text.trim();
+    final safeText = _cleanAiMessageForVoiceAndSemantics(text);
     if (safeText.isNotEmpty) {
       parts.add(safeText);
     }
@@ -3558,32 +3558,43 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       final trimmed = line.trim();
       if (trimmed.isEmpty) continue;
 
-      if (trimmed.startsWith('-')) {
+      if (RegExp(r'^#{1,6}\s+').hasMatch(trimmed)) {
+        final headingText = trimmed.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
+        widgets.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Text(
+            headingText,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Colors.red.shade900,
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+        ));
+      } else if (trimmed.startsWith('-') || trimmed.startsWith('*')) {
         // Bullet point
+        final bulletText = trimmed.substring(1).trim();
         widgets.add(Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               const Text('• ',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600)),
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               Expanded(
                 child: DefaultTextStyle(
                   style: Theme.of(context).textTheme.bodyMedium!.copyWith(
                         height: 1.35,
                         color: Colors.red.shade900,
                       ),
-                  child:
-                      _buildBoldAwareText(context, trimmed.substring(1).trim()),
+                  child: _buildBoldAwareText(context, bulletText),
                 ),
               ),
             ],
           ),
         ));
-      } else if (RegExp(r'^\d+\.').hasMatch(trimmed)) {
+      } else if (RegExp(r'^\d+\.\s*').hasMatch(trimmed)) {
         // Numbered list
-        final match = RegExp(r'^(\d+)\.\s*(.*)$').firstMatch(trimmed);
+        final match = RegExp(r'^(\d+)\.\s*(.*) $').firstMatch('$trimmed\u0000');
         if (match != null) {
           widgets.add(Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
@@ -3591,8 +3602,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text('${match.group(1)}. ',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600)),
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
                 Expanded(
                   child: DefaultTextStyle(
                     style: Theme.of(context).textTheme.bodyMedium!.copyWith(
@@ -3607,7 +3617,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           ));
         }
       } else {
-        // Regular text with bold support
+        // Regular text with bold/italic support
         widgets.add(Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: DefaultTextStyle(
@@ -3708,6 +3718,45 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         .map((line) => line.trimRight())
         .where((line) => line.trim().isNotEmpty)
         .join('\n');
+  }
+
+  String _cleanAiMessageForVoiceAndSemantics(String text) {
+    var cleaned = text;
+    cleaned = cleaned.replaceAll(RegExp(r'\[\[AI_SOURCE:(GEMINI|BUILTIN)\]\]'), '');
+    cleaned = cleaned.replaceAll(RegExp(r'\[\[AI_STATUS:[^\]]+\]\]'), '');
+    cleaned = _removeYoutubeUrlsForDisplay(cleaned);
+
+    final lines = cleaned
+        .split('\n')
+        .map((line) {
+          var trimmed = line.trim();
+          trimmed = trimmed.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
+          trimmed = trimmed.replaceFirst(RegExp(r'^\d+\.\s*'), '');
+          trimmed = trimmed.replaceFirst(RegExp(r'^[\-*]\s*'), '');
+          return trimmed;
+        })
+        .where((line) => line.isNotEmpty)
+        .toList();
+
+    cleaned = lines.join('. ');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'\*\*(.+?)\*\*'),
+      (match) => match.group(1) ?? '',
+    );
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'__(.+?)__'),
+      (match) => match.group(1) ?? '',
+    );
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'\*(.+?)\*'),
+      (match) => match.group(1) ?? '',
+    );
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'_(.+?)_'),
+      (match) => match.group(1) ?? '',
+    );
+
+    return cleaned.trim();
   }
 
   Widget _buildYoutubePreviewCard(
@@ -3845,16 +3894,23 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
   Widget _buildBoldAwareText(BuildContext context, String text) {
     final parts = <TextSpan>[];
-    final regex = RegExp(r'\*\*(.+?)\*\*');
+    final regex = RegExp(r'(\*\*|__)(.+?)\1|(\*|_)(.+?)\3');
     int lastIndex = 0;
 
     for (final match in regex.allMatches(text)) {
       if (match.start > lastIndex) {
         parts.add(TextSpan(text: text.substring(lastIndex, match.start)));
       }
+
+      final matchedText = match.group(2) ?? match.group(4) ?? '';
+      final isStrong = match.group(1) != null;
+      final isEmphasis = match.group(3) != null;
+
       parts.add(TextSpan(
-        text: match.group(1),
-        style: const TextStyle(fontWeight: FontWeight.bold),
+        text: matchedText,
+        style: isStrong
+            ? const TextStyle(fontWeight: FontWeight.bold)
+            : const TextStyle(fontStyle: FontStyle.italic),
       ));
       lastIndex = match.end;
     }
