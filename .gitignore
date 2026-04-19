@@ -113,6 +113,10 @@ android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
 env/dev.json
 
+# Local AI/dev artifacts
+.claude/
+scratch/
+
 # Coverage
 coverage/
 

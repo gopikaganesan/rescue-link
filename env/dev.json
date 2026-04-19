@@ -1,8 +1,0 @@
-{
-  "GEMINI_API_KEY":"AIzaSyDd7B3-8xu4KzZbeZw4-_C22xQGTxa6h6o",
-  "USE_CLOUD_TRANSCRIPTION": "false",
-  "MEDIA_UPLOAD_PROVIDER": "cloudinary",
-  "CLOUDINARY_CLOUD_NAME": "drjru2yn6",
-  "CLOUDINARY_UPLOAD_PRESET": "rescue_link_preset"
-}
-
