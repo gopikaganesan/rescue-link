@@ -6,20 +6,13 @@
 
     <LinearLayout
         android:id="@+id/widget_container"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="96dp"
+        android:layout_height="96dp"
         android:layout_centerInParent="true"
         android:background="@drawable/widget_background"
         android:orientation="vertical"
         android:gravity="center"
-        android:padding="16dp">
-
-        <ImageView
-            android:id="@+id/sos_icon"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:src="@mipmap/ic_launcher"
-            android:contentDescription="@string/sos_button_description" />
+        android:padding="12dp">
 
         <TextView
             android:layout_width="wrap_content"
@@ -27,8 +20,8 @@
             android:text="SOS"
             android:textColor="#FFFFFF"
             android:textStyle="bold"
-            android:textSize="18sp"
-            android:layout_marginTop="4dp" />
+            android:textSize="24sp"
+            android:textAllCaps="true" />
     </LinearLayout>
 
 </RelativeLayout>

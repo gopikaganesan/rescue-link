@@ -3,10 +3,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../core/providers/auth_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/app_settings_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/models/responder_model.dart';
+import 'responder_chat_list_screen.dart';
+import 'victim_chat_list_screen.dart';
 import 'responder_profile_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -172,6 +175,37 @@ class _MapScreenState extends State<MapScreen> {
     final settings = context.watch<AppSettingsProvider>();
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () async {
+            final navigator = Navigator.of(context);
+            final auth = context.read<AuthProvider>();
+            final didPop = await navigator.maybePop();
+            if (didPop) return;
+            if (!mounted) return;
+
+            if (auth.currentUser?.isResponder == true) {
+              navigator.pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => ResponderChatListScreen(
+                    currentUserId: auth.currentUser!.id,
+                    currentUserName: auth.currentUser!.displayName,
+                  ),
+                ),
+              );
+            } else {
+              navigator.pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => VictimChatListScreen(
+                    currentUserId: auth.currentUser?.id ?? '',
+                    currentUserName: auth.currentUser?.displayName ?? '',
+                  ),
+                ),
+              );
+            }
+          },
+          tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+        ),
         title: Text(_hasTarget ? settings.t('map_navigation_map') : settings.t('map_responders_map')),
         actions: [
           IconButton(

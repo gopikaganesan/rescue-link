@@ -1,6 +1,9 @@
 # Voice Assistant Setup Guide
 
-Rescue Link utilizes a **Universal Deep Linking** architecture, enabling it to synchronize with nearly any voice assistant or automation tool.
+Rescue Link uses a **universal deep link architecture** so the same emergency trigger can be activated from native assistants, automation routines, and voice commands.
+This design ensures consistent SOS handling across multiple assistant platforms while keeping the app logic centralized.
+
+Supported trigger mechanisms include native App Actions, Siri Shortcuts, Bixby Routines, and Alexa custom routines.
 
 ## 🤖 Google Assistant (Native Integration)
 The app is pre-configured to handle Google Assistant voice intents via **App Actions**.

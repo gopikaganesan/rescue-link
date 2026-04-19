@@ -93,16 +93,22 @@ class _AuthScreenState extends State<AuthScreen> {
                   title: Text(settings.t('home_show_all_languages')),
                   subtitle: Text(settings.t('home_show_all_languages_hint')),
                 ),
-                ...settings.availableLanguageCodes.map(
-                  (code) => RadioListTile<String>(
-                    value: code,
-                    title: Text(settings.languageLabel(code)),
-                    onChanged: (value) {
-                      if (value != null) {
-                        settings.setLanguage(value);
-                      }
-                      Navigator.of(sheetContext).pop();
-                    },
+                RadioGroup<String>(
+                  groupValue: settings.languageCode,
+                  onChanged: (value) {
+                    if (value != null) {
+                      settings.setLanguage(value);
+                    }
+                    Navigator.of(sheetContext).pop();
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: settings.availableLanguageCodes.map(
+                      (code) => RadioListTile<String>(
+                        value: code,
+                        title: Text(settings.languageLabel(code)),
+                      ),
+                    ).toList(),
                   ),
                 ),
               ],
@@ -256,10 +262,14 @@ class _AuthScreenState extends State<AuthScreen> {
                         onPressed: authProvider.isLoading
                             ? null
                             : () async {
+                                final messenger = ScaffoldMessenger.of(context);
                                 final success =
                                     await authProvider.ensureAuthenticated();
-                                if (!success && mounted && authProvider.error != null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                if (!mounted) {
+                                  return;
+                                }
+                                if (!success && authProvider.error != null) {
+                                  messenger.showSnackBar(
                                     SnackBar(content: Text(authProvider.error!)),
                                   );
                                 }

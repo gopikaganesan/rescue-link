@@ -1664,7 +1664,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       String uid, String name, String status) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      // Check if widget is still mounted before using context
       if (!mounted) return;
 
       await _chatService.resolveJoinRequest(
@@ -1672,14 +1671,16 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         request: {'uid': uid, 'displayName': name},
         approved: status == 'approved',
       );
+
+      if (!mounted) return;
+      final settings = context.read<AppSettingsProvider>();
       final localizedStatus = status == 'approved'
-          ? context.read<AppSettingsProvider>().t('status_approved')
-          : context.read<AppSettingsProvider>().t('status_rejected');
+          ? settings.t('status_approved')
+          : settings.t('status_rejected');
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            context
-                .read<AppSettingsProvider>()
+            settings
                 .t('chat_request_status')
                 .replaceAll('{status}', localizedStatus)
                 .replaceAll('{name}', name),
@@ -1842,23 +1843,25 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   Future<void> _requestApproval() async {
     setState(() => _isJoining = true);
     final messenger = ScaffoldMessenger.of(context);
+    final settings = context.read<AppSettingsProvider>();
     try {
       await _chatService.requestJoinApproval(
         sosId: widget.sosId,
         responderUid: widget.currentUserId,
         responderName: widget.currentUserName,
       );
+      if (!mounted) return;
       messenger.showSnackBar(SnackBar(
         content: Text(
-          context.read<AppSettingsProvider>().t('chat_join_request_sent'),
+          settings.t('chat_join_request_sent'),
         ),
       ));
     } catch (e) {
+      if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            context
-                .read<AppSettingsProvider>()
+            settings
                 .t('chat_failed_request')
                 .replaceAll('{error}', '$e'),
           ),
@@ -1874,31 +1877,32 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
+    final settings = context.read<AppSettingsProvider>();
 
     try {
-      // Show loading indicator
       messenger.showSnackBar(
         SnackBar(
-          content: Text(context.read<AppSettingsProvider>().t('chat_fetching_profile')),
+          content: Text(settings.t('chat_fetching_profile')),
           duration: const Duration(milliseconds: 500),
         ),
       );
 
-      // Fetch responder document
       final snapshot = await FirebaseFirestore.instance
           .collection('responders')
           .doc(uid)
           .get();
 
+      if (!mounted) return;
+
       if (!snapshot.exists) {
         messenger.showSnackBar(
-          SnackBar(content: Text(context.read<AppSettingsProvider>().t('chat_profile_not_found'))),
+          SnackBar(content: Text(settings.t('chat_profile_not_found'))),
         );
         return;
       }
 
       final data = snapshot.data()!;
-      data['id'] = snapshot.id; // Ensure ID is present
+      data['id'] = snapshot.id;
       final responderModel = ResponderModel.fromMap(data);
 
       navigator.push(
@@ -1912,8 +1916,9 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('${context.read<AppSettingsProvider>().t('chat_failed_load_profile')}$e')),
+        SnackBar(content: Text('${settings.t('chat_failed_load_profile')}$e')),
       );
     }
   }
@@ -2670,6 +2675,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       _isRepairing = true;
     });
 
+    final defaultMessage =
+        context.read<AppSettingsProvider>().t('sos_default_message');
     Object? lastError;
     var chatReady = false;
 
@@ -2702,7 +2709,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           victimUid: widget.currentUserId,
           victimName: widget.currentUserName,
           sosMessage: overviewMessage.trim().isEmpty
-              ? context.read<AppSettingsProvider>().t('sos_default_message')
+              ? defaultMessage
               : overviewMessage,
           media: overviewMedia,
         );
@@ -3895,7 +3902,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     final urlPattern =
         RegExp(r'(geo:\-?\d+(\.\d+)?,\-?\d+(\.\d+)?)|(https?://[^\s]+)');
     final matches = urlPattern.allMatches(text);
-    if (matches.isEmpty) return Text(text);
 
     final spans = <InlineSpan>[];
     int last = 0;
@@ -3934,7 +3940,26 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       spans.add(TextSpan(text: text.substring(last), style: style));
     }
 
-    return RichText(text: TextSpan(children: spans));
+    final Widget messageText = matches.isEmpty
+        ? Text(text)
+        : RichText(
+            textScaler: MediaQuery.textScalerOf(context),
+            text: TextSpan(children: spans),
+          );
+
+    final phoneNumbers = _extractPhoneNumbers(text);
+    if (phoneNumbers.isEmpty) {
+      return messageText;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        messageText,
+        const SizedBox(height: 8),
+        _buildCallButtons(context, phoneNumbers),
+      ],
+    );
   }
 
   Widget _buildBoldAwareText(BuildContext context, String text) {
@@ -3949,7 +3974,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
       final matchedText = match.group(2) ?? match.group(4) ?? '';
       final isStrong = match.group(1) != null;
-      final isEmphasis = match.group(3) != null;
 
       parts.add(TextSpan(
         text: matchedText,
@@ -3965,6 +3989,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     }
 
     return RichText(
+      textScaler: MediaQuery.textScalerOf(context),
       text: TextSpan(
         style: DefaultTextStyle.of(context).style.copyWith(height: 1.35),
         children: parts,
@@ -3976,17 +4001,17 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     // Match only genuine short emergency codes (3-4 digits) or full phone numbers.
     // Avoids matching arbitrary 2-digit numbers like "77" that appear in normal text.
     final phonePattern = RegExp(
-      r'\b(?:'
+      r'(?<!\d)(?:'
       r'\d{3,4}|' // 3–4 digit short codes: 112, 100, 108, 911
-      r'\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}' // international/10-digit
-      r')\b',
+      r'\+?\d(?:[\s.\-()]?\d){9,14}' // 10–15 digits with optional separators
+      r')(?!\d)',
     );
     // Additional filter: skip numbers that are clearly not emergency/phone numbers
     const knownPhoneMinValue =
         100; // nothing below 100 is a real emergency number
     return phonePattern
         .allMatches(text)
-        .map((m) => m.group(0)!.replaceAll(RegExp(r'[\s.-]'), ''))
+        .map((m) => m.group(0)!.replaceAll(RegExp(r'[\s().-]'), ''))
         .where((phoneNumber) {
           final parsed = int.tryParse(phoneNumber);
           // If it parsed as a plain integer and is < 100, skip it
