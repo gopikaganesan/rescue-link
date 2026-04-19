@@ -3,9 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/providers/app_settings_provider.dart';
+import '../core/providers/auth_provider.dart';
 import '../services/chat_service.dart';
+import '../widgets/account_sheet.dart';
+import '../widgets/fixed_footer_navigation_bar.dart';
 import '../widgets/translated_text.dart';
+import 'auth_screen.dart';
 import 'group_chat_screen.dart';
+import 'home_screen.dart';
+import 'map_screen.dart';
+import 'responder_requests_screen.dart';
 
 class ResponderChatListScreen extends StatefulWidget {
   const ResponderChatListScreen({
@@ -44,7 +51,6 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
   late bool _showAllActiveChats;
   final ChatService _chatService = ChatService();
   final Set<String> _autoPruneInProgress = <String>{};
-  final Set<String> _leavingSosIds = <String>{};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -60,6 +66,42 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
     super.dispose();
   }
 
+  PageRouteBuilder<void> _noTransitionRoute(Widget page) {
+    return PageRouteBuilder<void>(
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      transitionsBuilder: (_, __, ___, child) => child,
+    );
+  }
+
+  void _showAccountSheet() {
+    showAccountSheet(
+      context,
+      onLogin: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const AuthScreen(showGuestButton: false),
+          ),
+        );
+      },
+      onLogout: () async {
+        await context.read<AuthProvider>().logout();
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Signed out successfully.')),
+        );
+      },
+      onOpenResponderRequests: () {
+        Navigator.of(context).pushReplacement(
+          _noTransitionRoute(const ResponderRequestsScreen()),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.read<AppSettingsProvider>();
@@ -70,8 +112,28 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
 
     return Scaffold(
       appBar: AppBar(title: Text(settings.t('title_responder_alerts'))),
-      body: Column(
-        children: <Widget>[
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity == null) {
+            return;
+          }
+
+          if (details.primaryVelocity! > 300) {
+            Navigator.of(context).pushReplacement(
+              _noTransitionRoute(const ResponderRequestsScreen()),
+            );
+            return;
+          }
+
+          if (details.primaryVelocity! < -300) {
+            Navigator.of(context).push(
+              _noTransitionRoute(const MapScreen()),
+            );
+          }
+        },
+        child: Column(
+          children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
             child: Wrap(
@@ -422,6 +484,27 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
           ),
         ],
       ),
+    ),
+      bottomNavigationBar: FixedFooterNavigationBar(
+        activeIndex: 2,
+        onSosTap: () {
+          Navigator.of(context).pushReplacement(
+            _noTransitionRoute(const HomeScreen()),
+          );
+        },
+        onPeopleTap: () {
+          Navigator.of(context).pushReplacement(
+            _noTransitionRoute(const ResponderRequestsScreen()),
+          );
+        },
+        onChatsTap: () {},
+        onMapTap: () {
+          Navigator.of(context).push(
+            _noTransitionRoute(const MapScreen()),
+          );
+        },
+        onProfileTap: _showAccountSheet,
+      ),
     );
   }
 
@@ -449,72 +532,6 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
     }
   }
 
-  Future<void> _confirmLeaveActiveConversation({
-    required String sosId,
-    required bool isJoinedByMe,
-  }) async {
-    if (!isJoinedByMe || _leavingSosIds.contains(sosId)) {
-      return;
-    }
-
-    final settings = context.read<AppSettingsProvider>();
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(settings.t('dialog_leave_conversation_title')),
-            content: Text(
-              settings.t('dialog_leave_conversation_body'),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: Text(settings.t('button_cancel')),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: Text(settings.t('button_leave')),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-
-    if (!confirmed || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _leavingSosIds.add(sosId);
-    });
-
-    try {
-      await _chatService.removeResponderFromChatList(
-        sosId: sosId,
-        responderUid: widget.currentUserId,
-      );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(settings.t('snackbar_conversation_removed'))),
-      );
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to leave right now. Please retry.'),
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _leavingSosIds.remove(sosId);
-        });
-      }
-    }
-  }
 
   static Map<String, dynamic> _asMap(dynamic raw) {
     if (raw is Map) {

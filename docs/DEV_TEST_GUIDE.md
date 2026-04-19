@@ -7,6 +7,13 @@ This guide explains how to test the **Universal SOS** features (Widgets and Voic
 2.  **ADB Installed**: You should be able to run `adb` commands from your computer.
 3.  **Physical Device Connected**: Connected via USB or Wireless ADB.
 
+## Validation Checklist
+- Verify the app installs and launches successfully on a physical device.
+- Confirm the SOS widget appears and launches the SOS flow immediately.
+- Validate voice assistant deep link handling via ADB or routine automation.
+- Check Firestore emergency request records for correct category, severity, and requester metadata.
+- Confirm notification dispatch and responder discovery behavior in the active flows.
+
 ---
 
 ## 🏗️ 1. Home Screen Widget

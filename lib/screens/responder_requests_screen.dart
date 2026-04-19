@@ -11,9 +11,15 @@ import '../core/providers/emergency_request_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/services/responder_matching_service.dart';
+import '../widgets/fixed_footer_navigation_bar.dart';
+import '../widgets/account_sheet.dart';
 import '../widgets/translated_text.dart';
+import 'auth_screen.dart';
 import 'group_chat_screen.dart';
+import 'home_screen.dart';
 import 'map_screen.dart';
+import 'responder_chat_list_screen.dart';
+import 'victim_chat_list_screen.dart';
 
 class ResponderRequestsScreen extends StatefulWidget {
   const ResponderRequestsScreen({super.key});
@@ -48,6 +54,42 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
   void dispose() {
     _voicePlayer.dispose();
     super.dispose();
+  }
+
+  PageRouteBuilder<void> _noTransitionRoute(Widget page) {
+    return PageRouteBuilder<void>(
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      transitionsBuilder: (_, __, ___, child) => child,
+    );
+  }
+
+  void _showAccountSheet() {
+    showAccountSheet(
+      context,
+      onLogin: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const AuthScreen(showGuestButton: false),
+          ),
+        );
+      },
+      onLogout: () async {
+        await context.read<AuthProvider>().logout();
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Signed out successfully.')),
+        );
+      },
+      onOpenResponderRequests: () {
+        Navigator.of(context).pushReplacement(
+          _noTransitionRoute(const ResponderRequestsScreen()),
+        );
+      },
+    );
   }
 
   Future<void> _openAttachment(String url) async {
@@ -192,7 +234,44 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
           ),
         ],
       ),
-      body: Consumer<EmergencyRequestProvider>(
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity == null) {
+            return;
+          }
+
+          if (details.primaryVelocity! > 300) {
+            Navigator.of(context).pushReplacement(
+              _noTransitionRoute(const HomeScreen()),
+            );
+            return;
+          }
+
+          if (details.primaryVelocity! < -300) {
+            final auth = context.read<AuthProvider>();
+            if (auth.currentUser?.isResponder == true) {
+              Navigator.of(context).pushReplacement(
+                _noTransitionRoute(
+                  ResponderChatListScreen(
+                    currentUserId: auth.currentUser!.id,
+                    currentUserName: auth.currentUser!.displayName,
+                  ),
+                ),
+              );
+            } else {
+              Navigator.of(context).pushReplacement(
+                _noTransitionRoute(
+                  VictimChatListScreen(
+                    currentUserId: auth.currentUser?.id ?? '',
+                    currentUserName: auth.currentUser?.displayName ?? '',
+                  ),
+                ),
+              );
+            }
+          }
+        },
+        child: Consumer<EmergencyRequestProvider>(
         builder: (context, provider, _) {
           if (provider.isLoading) {
             return const Center(child: CircularProgressIndicator());
@@ -518,6 +597,47 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
             },
           );
         },
+      ),
+    ),
+      bottomNavigationBar: FixedFooterNavigationBar(
+        activeIndex: 1,
+        onSosTap: () {
+          Navigator.of(context).pushReplacement(
+            _noTransitionRoute(const HomeScreen()),
+          );
+        },
+        onPeopleTap: () {
+          // current screen
+        },
+        onChatsTap: () {
+          final auth = context.read<AuthProvider>();
+          if (auth.currentUser?.isResponder == true) {
+            Navigator.of(context).pushReplacement(
+              _noTransitionRoute(
+                ResponderChatListScreen(
+                  currentUserId: auth.currentUser!.id,
+                  currentUserName: auth.currentUser!.displayName,
+                ),
+              ),
+            );
+            return;
+          }
+
+          Navigator.of(context).pushReplacement(
+            _noTransitionRoute(
+              VictimChatListScreen(
+                currentUserId: auth.currentUser?.id ?? '',
+                currentUserName: auth.currentUser?.displayName ?? '',
+              ),
+            ),
+          );
+        },
+        onMapTap: () {
+          Navigator.of(context).push(
+            _noTransitionRoute(const MapScreen()),
+          );
+        },
+        onProfileTap: _showAccountSheet,
       ),
     );
   }

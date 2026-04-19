@@ -3,8 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/providers/app_settings_provider.dart';
+import '../core/providers/auth_provider.dart';
 import '../services/chat_service.dart';
+import '../widgets/account_sheet.dart';
+import '../widgets/fixed_footer_navigation_bar.dart';
+import 'auth_screen.dart';
 import 'group_chat_screen.dart';
+import 'home_screen.dart';
+import 'map_screen.dart';
+import 'responder_requests_screen.dart';
 
 enum _VictimChatFilter { active, cancelled, all }
 
@@ -50,14 +57,77 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
     super.dispose();
   }
 
+  PageRouteBuilder<void> _noTransitionRoute(Widget page) {
+    return PageRouteBuilder<void>(
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      transitionsBuilder: (_, __, ___, child) => child,
+    );
+  }
+
+  void _showAccountSheet() {
+    showAccountSheet(
+      context,
+      onLogin: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const AuthScreen(showGuestButton: false),
+          ),
+        );
+      },
+      onLogout: () async {
+        await context.read<AuthProvider>().logout();
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Signed out successfully.')),
+        );
+      },
+      onOpenResponderRequests: () {
+        Navigator.of(context).pushReplacement(
+          _noTransitionRoute(const ResponderRequestsScreen()),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.read<AppSettingsProvider>();
+    final auth = context.read<AuthProvider>();
 
     return Scaffold(
       appBar: AppBar(title: Text(settings.t('title_my_sos_chats'))),
-      body: Column(
-        children: <Widget>[
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity == null) {
+            return;
+          }
+
+          if (details.primaryVelocity! > 300) {
+            if (auth.currentUser?.isResponder == true) {
+              Navigator.of(context).pushReplacement(
+                _noTransitionRoute(const ResponderRequestsScreen()),
+              );
+            } else {
+              Navigator.of(context).pushReplacement(
+                _noTransitionRoute(const HomeScreen()),
+              );
+            }
+            return;
+          }
+
+          if (details.primaryVelocity! < -300) {
+            Navigator.of(context).push(
+              _noTransitionRoute(const MapScreen()),
+            );
+          }
+        },
+        child: Column(
+          children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
             child: Wrap(
@@ -397,6 +467,24 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
             ),
           ),
         ],
+      ),
+    ),
+      bottomNavigationBar: FixedFooterNavigationBar(
+        activeIndex: 1,
+        showPeople: false,
+        onSosTap: () {
+          Navigator.of(context).pushReplacement(
+            _noTransitionRoute(const HomeScreen()),
+          );
+        },
+        onPeopleTap: () {},
+        onChatsTap: () {},
+        onMapTap: () {
+          Navigator.of(context).push(
+            _noTransitionRoute(const MapScreen()),
+          );
+        },
+        onProfileTap: _showAccountSheet,
       ),
     );
   }

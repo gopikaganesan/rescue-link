@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:typed_data';
-import 'package:animated_bottom_navigation_bar/animated_bottom_navigation_bar.dart';
 import 'package:audioplayers/audioplayers.dart';
+import '../widgets/fixed_footer_navigation_bar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -20,10 +20,8 @@ import '../core/providers/emergency_request_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/services/notification_service.dart';
-import '../core/services/media_upload_service.dart';
 import '../core/services/responder_matching_service.dart';
 import '../core/services/sos_service.dart';
-import '../core/services/transcription_service.dart';
 import 'auth_screen.dart';
 import 'group_chat_screen.dart';
 import 'victim_chat_list_screen.dart';
@@ -31,6 +29,7 @@ import 'responder_chat_list_screen.dart';
 import 'responder_registration_screen.dart';
 import 'responder_requests_screen.dart';
 import 'map_screen.dart';
+import '../widgets/account_sheet.dart';
 import '../widgets/sos_button.dart';
 
 
@@ -58,14 +57,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<String> _notifiedRequestIds = <String>{};
   String _lastDeliveryRoute = '';
   String? _currentSosRequestId; // Track current SOS for cancellation
-  int _bottomNavIndex = 0;
   final ImagePicker _imagePicker = ImagePicker();
   final SpeechToText _speechToText = SpeechToText();
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _voicePreviewPlayer = AudioPlayer();
-  final TranscriptionService _transcriptionService = TranscriptionService();
-  final MediaUploadService _mediaUploadService =
-      MediaUploadService.fromEnvironment();
+  final FlutterTts _flutterTts = FlutterTts();
   StreamSubscription<void>? _voicePreviewCompleteSub;
   bool _speechReady = false;
   bool _isTranscribing = false;
@@ -73,8 +69,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isPreviewPlaying = false;
   bool _includeVoiceClip = false;
   bool _forceCriticalSeverity = false;
-  String _transcriptionProvider = 'On-device speech';
-  double? _transcriptionConfidence;
   final bool _cloudTranscriptionEnabled = const String.fromEnvironment(
           'USE_CLOUD_TRANSCRIPTION',
           defaultValue: 'false') ==
@@ -82,7 +76,6 @@ class _HomeScreenState extends State<HomeScreen> {
   XFile? _selectedImage;
   String? _voiceTranscript;
   String? _voiceAudioPath;
-  String? _attachmentType;
 
   @override
   void initState() {
@@ -91,6 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _initializeScreen();
     });
     _initializeSpeech();
+    _configureVoiceTestTts();
     _voicePreviewCompleteSub = _voicePreviewPlayer.onPlayerComplete.listen((_) {
       if (!mounted) {
         return;
@@ -140,6 +134,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  Future<void> _configureVoiceTestTts() async {
+    try {
+      await _flutterTts.setSpeechRate(0.5);
+      await _flutterTts.setPitch(1.0);
+      await _flutterTts.setVolume(1.0);
+      await _flutterTts.setLanguage('en-US');
+    } catch (_) {
+      // Ignore if TTS setup is not available.
+    }
+  }
+
+  Future<void> _runVoiceTest(String message) async {
+    await _flutterTts.stop();
+    _announce(message);
+    try {
+      await _flutterTts.speak(message);
+    } catch (_) {
+      // Silent fallback if TTS is unavailable.
     }
   }
 
@@ -360,6 +375,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final sosService = SosService();
+      final commsProvider = context.read<CommsProvider>();
+      final responderProvider = context.read<ResponderProvider>();
+      final appSettings = context.read<AppSettingsProvider>();
       
       // Execute the SOS flow via the service
       final requestId = await sosService.triggerSos(
@@ -370,14 +388,14 @@ class _HomeScreenState extends State<HomeScreen> {
         forceCritical: _forceCriticalSeverity,
       );
 
+      if (!mounted) return;
+
       if (requestId != null) {
         _currentSosRequestId = requestId;
         
         // Track the route (for UI feedback)
-        final commsProvider = context.read<CommsProvider>();
-        final responderProvider = context.read<ResponderProvider>();
         _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
-          settings: context.read<AppSettingsProvider>(),
+          settings: appSettings,
           cloudWriteSucceeded: true,
           hasNearbyResponders: responderProvider.nearbyResponders.isNotEmpty,
         );
@@ -387,6 +405,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _showSnackBar('SOS could not complete. Check permissions or network.');
       }
     } catch (e) {
+      if (!mounted) return;
       _showSnackBar('SOS error: ${e.toString()}');
     } finally {
       if (mounted) {
@@ -417,6 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final responderProvider = context.read<ResponderProvider>();
     final analysis = crisisProvider.latestAnalysis;
     final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
+    final messenger = ScaffoldMessenger.of(context);
 
     showDialog(
       context: context,
@@ -561,15 +581,12 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           // Cancel SOS - prominent red button
           ElevatedButton.icon(
-            onPressed: () async {
-              if (_currentSosRequestId != null) {
-                await emergencyRequestProvider
-                    .cancelRequest(_currentSosRequestId!);
-                _currentSosRequestId = null;
-              }
-              Navigator.pop(dialogContext);
-              _showSnackBar('SOS cancelled.');
-            },
+            onPressed: () => _cancelCurrentSosRequest(
+              _currentSosRequestId,
+              dialogContext,
+              emergencyRequestProvider,
+              messenger,
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red.shade600,
               foregroundColor: Colors.white,
@@ -627,6 +644,28 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     _announce(context.read<AppSettingsProvider>().t('status_sos_activated'));
+  }
+
+  Future<void> _cancelCurrentSosRequest(
+    String? requestId,
+    BuildContext dialogContext,
+    EmergencyRequestProvider emergencyRequestProvider,
+    ScaffoldMessengerState messenger,
+  ) async {
+    if (requestId == null) {
+      return;
+    }
+
+    final dialogNavigator = Navigator.of(dialogContext);
+    await emergencyRequestProvider.cancelRequest(requestId);
+    if (!mounted) {
+      return;
+    }
+
+    dialogNavigator.pop();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('SOS cancelled.')),
+    );
   }
 
   void _showEmergencyInfoBalloon() {
@@ -732,7 +771,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _announce(String message) {
-    SemanticsService.announce(message, TextDirection.ltr);
+    final view = View.of(context);
+    SemanticsService.sendAnnouncement(view, message, TextDirection.ltr);
   }
 
   void _openResponderRegistration() {
@@ -819,8 +859,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openAuthScreen() {
-    Navigator.of(context).push(
+  Future<void> _openAuthScreen() async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => const AuthScreen(showGuestButton: false),
       ),
@@ -970,188 +1010,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showAccountSheet() {
     final authProvider = context.read<AuthProvider>();
-    final user = authProvider.currentUser;
 
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) {
-        if (user == null) {
-          return const Padding(
-            padding: EdgeInsets.all(20),
-            child: Center(child: Text('Not signed in')),
-          );
-        }
-
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                height: 4,
-                width: 40,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade400,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-
-              Builder(
-                builder: (context) {
-                  final localizedName = context
-                      .read<AppSettingsProvider>()
-                      .localizedDisplayName(user.displayName);
-                  return Row(
-                    children: [
-                  CircleAvatar(
-                    radius: 28,
-                    child: Text(
-                      localizedName.isNotEmpty
-                          ? localizedName[0].toUpperCase()
-                          : 'U',
-                      style: const TextStyle(fontSize: 20),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          localizedName,
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          user.email.isEmpty
-                              ? (user.phoneNumber ??
-                                  context
-                                      .read<AppSettingsProvider>()
-                                      .t('auth_no_email'))
-                              : user.email,
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Chip(
-                  label: Text(
-                    authProvider.isAnonymousUser
-                        ? context.read<AppSettingsProvider>().t('account_anonymous_session')
-                        : context.read<AppSettingsProvider>().t('account_registered_account'),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Column(
-                children: [
-                  if (authProvider.isAnonymousUser)
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.of(sheetContext).pop();
-                          _openAuthScreen();
-                        },
-                        icon: const Icon(Icons.login),
-                        label: Text(context.read<AppSettingsProvider>().t('account_signin_create')),
-                      ),
-                    ),
-                  if (!authProvider.isAnonymousUser)
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          Navigator.of(sheetContext).pop();
-                          await _logoutRegisteredUser();
-                        },
-                        icon: const Icon(Icons.logout),
-                        label: Text(
-                          context.read<AppSettingsProvider>().t('button_sign_out')),
-                      ),
-                    ),
-                  if (user.isResponder)
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.of(sheetContext).pop();
-                          _openResponderRequests();
-                        },
-                        icon: const Icon(Icons.list_alt),
-                        label: Text(
-                          context.read<AppSettingsProvider>().t('button_people_needing_help')),
-                      ),
-                    ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
-
-              // 🔹 Responder Section
-              if (user.isResponder)
-                Consumer<ResponderProvider>(
-                  builder: (context, responderProvider, _) {
-                    final mine = responderProvider.responders
-                        .where((r) => r.userId == user.id)
-                        .toList();
-
-                    final isAvailable =
-                        mine.isEmpty ? true : mine.first.isAvailable;
-
-                    return Card(
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        side: BorderSide(color: Colors.grey.shade300),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          children: [
-                            SwitchListTile.adaptive(
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(
-                                context.read<AppSettingsProvider>().t('label_responder_online')),
-                              value: isAvailable,
-                              onChanged: _toggleAvailability,
-                            ),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton(
-                                onPressed: () async {
-                                  Navigator.of(sheetContext).pop();
-                                  await _deregisterResponder();
-                                },
-                                child: Text(
-                                  context.read<AppSettingsProvider>().t('responder_deregister'),
-                                  style: TextStyle(color: Colors.red),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-            ],
-          ),
-        );
+    showAccountSheet(
+      context,
+      onLogin: () async {
+        await _openAuthScreen();
       },
+      onLogout: () async {
+        await _logoutRegisteredUser();
+      },
+      onOpenResponderRequests: _openResponderRequests,
+      isResponderAvailable: authProvider.currentUser?.isResponder == true
+          ? context
+              .read<ResponderProvider>()
+              .responderForUserId(authProvider.currentUser!.id)
+              ?.isAvailable
+              ?? true
+          : null,
+      onToggleAvailability: authProvider.currentUser?.isResponder == true
+          ? (value) async {
+              await _toggleAvailability(value);
+            }
+          : null,
+      onDeregisterResponder: authProvider.currentUser?.isResponder == true
+          ? _deregisterResponder
+          : null,
     );
   }
 
@@ -1222,6 +1105,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         value: settings.hapticsEnabled,
                         onChanged: (v) {
                           settings.setHapticsEnabled(v);
+                          if (mounted) {
+                            _showSnackBar(v
+                                ? settings.t('accessibility_haptics_enabled')
+                                : settings.t('accessibility_haptics_disabled'));
+                          }
                           setModalState(() {});
                         },
                       ),
@@ -1233,6 +1121,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         value: settings.sosFlashEnabled,
                         onChanged: (v) {
                           settings.setSosFlashEnabled(v);
+                          if (mounted) {
+                            _showSnackBar(v
+                                ? settings.t('accessibility_flashlight_enabled')
+                                : settings.t('accessibility_flashlight_disabled'));
+                          }
                           setModalState(() {});
                         },
                       ),
@@ -1348,11 +1241,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                 borderRadius: BorderRadius.circular(14),
                               ),
                             ),
-                            onPressed: () {
-                              _announce(
+                            onPressed: () async {
+                              await _runVoiceTest(
                                 settings.t('accessibility_announcement_text'),
                               );
-                              _showSnackBar(settings.t('accessibility_announcement_sent'));
+                              if (mounted) {
+                                _showSnackBar(settings.t('accessibility_announcement_sent'));
+                              }
                             },
                             icon: const Icon(Icons.record_voice_over),
                             label: Text(
@@ -1649,10 +1544,6 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _isTranscribing = true;
           _voiceTranscript = words.isEmpty ? _voiceTranscript : words;
-          if (words.isNotEmpty) {
-            _transcriptionProvider = 'On-device speech';
-            _transcriptionConfidence = null;
-          }
           if (words.isNotEmpty &&
               (result.finalResult ||
                   _emergencyContextController.text.trim().isEmpty)) {
@@ -1744,7 +1635,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _removePhotoAttachment() {
     setState(() {
       _selectedImage = null;
-      _attachmentType = null;
     });
   }
 
@@ -1905,20 +1795,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  List<String> _speechAlternatives(String locale) {
-    switch (locale) {
-      case 'ta-IN':
-        return const <String>['en-IN', 'hi-IN'];
-      case 'hi-IN':
-        return const <String>['en-IN', 'ta-IN'];
-      case 'en-US':
-        return const <String>['en-IN', 'hi-IN'];
-      case 'en-IN':
-      default:
-        return const <String>['ta-IN', 'hi-IN'];
-    }
-  }
-
   Future<void> _toggleLocalVoicePreview() async {
     final localPath = _voiceAudioPath;
     if (localPath == null || localPath.trim().isEmpty) {
@@ -1943,39 +1819,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  String _contentTypeForName(String fileName) {
-    final lower = fileName.toLowerCase();
-    if (lower.endsWith('.png')) {
-      return 'image/png';
-    }
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-      return 'image/jpeg';
-    }
-    return 'image/jpeg';
-  }
-
-  Future<String?> _uploadAttachmentIfNeeded(String userId) async {
-    final image = _selectedImage;
-    if (image == null) {
-      return null;
-    }
-    return _mediaUploadService.uploadEmergencyImage(
-        image: image, userId: userId);
-  }
-
-  Future<String?> _uploadVoiceAudioIfNeeded(String userId) async {
-    final localPath = _voiceAudioPath;
-    if (localPath == null || localPath.trim().isEmpty) {
-      return null;
-    }
-    return _mediaUploadService.uploadEmergencyVoice(
-        localPath: localPath, userId: userId);
-  }
-
   @override
   void dispose() {
     _responderPollingTimer?.cancel();
     _stopOpenAppChatNotificationWatchers();
+    _flutterTts.stop();
     _speechToText.stop();
     _audioRecorder.dispose();
     _voicePreviewCompleteSub?.cancel();
@@ -1984,32 +1832,38 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  PageRouteBuilder<void> _noTransitionRoute(Widget page) {
+    return PageRouteBuilder<void>(
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      transitionsBuilder: (_, __, ___, child) => child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
     final authProvider = context.watch<AuthProvider>();
-    final crisisProvider = context.watch<CrisisProvider>();
 
-    // Build icon list dynamically
-    final List<IconData> iconList = [
-      Icons.wifi_tethering,
-      Icons.chat_bubble_outline,
-      if (authProvider.currentUser?.isResponder == true) Icons.support_agent,
-      Icons.map,
-      Icons.account_circle,
-    ];
-
-    // Map actions
-    final List<VoidCallback> actions = [
-      _showCommsSimulationSheet,
-      _openChats,
-      if (authProvider.currentUser?.isResponder == true) _openResponderRequests,
-      _openMap,
-      _showAccountSheet,
-    ];
+    void showResponderOnlySnackbar() {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This feature is available for responders only.'),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.wifi_tethering),
+          onPressed: _showCommsSimulationSheet,
+          tooltip: settings.t('comms_simulation_title'),
+        ),
         title: Text(settings.t('app_title')),
         centerTitle: true,
         elevation: 0,
@@ -2027,7 +1881,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity != null && details.primaryVelocity! < -300) {
+            final auth = context.read<AuthProvider>();
+            if (auth.currentUser?.isResponder == true) {
+              Navigator.of(context).pushReplacement(
+                _noTransitionRoute(const ResponderRequestsScreen()),
+              );
+            } else {
+              _openChats();
+            }
+          }
+        },
+        child: SingleChildScrollView(
           child: Padding(
               padding: const EdgeInsets.only(bottom: 20),
               child: Column(children: [
@@ -2254,6 +2122,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                       const SizedBox(height: 12),
+                      /*
                       if (false)
                         Align(
                           alignment: Alignment.centerLeft,
@@ -2265,30 +2134,24 @@ class _HomeScreenState extends State<HomeScreen> {
                                       fontWeight: FontWeight.w600,
                                     ),
                           ),
-                        ),
+                        ),*/
 
 
                       const SizedBox(height: 12),
                     ],
                   ),
                 ),
-              ]))),
-      bottomNavigationBar: AnimatedBottomNavigationBar(
-        icons: iconList,
-        activeIndex: _bottomNavIndex,
-        gapLocation: GapLocation.none,
-        notchSmoothness: NotchSmoothness.verySmoothEdge,
-        backgroundColor: Colors.red.shade700,
-        activeColor: Colors.white,
-        inactiveColor: Colors.white70,
-        onTap: (index) {
-          setState(() {
-            _bottomNavIndex = index;
-          });
-
-          // Trigger same AppBar actions
-          actions[index]();
-        },
+              ])))),
+      bottomNavigationBar: FixedFooterNavigationBar(
+        activeIndex: 0,
+        showPeople: authProvider.currentUser?.isResponder == true,
+        onSosTap: () {},
+        onPeopleTap: authProvider.currentUser?.isResponder == true
+            ? _openResponderRequests
+            : showResponderOnlySnackbar,
+        onChatsTap: _openChats,
+        onMapTap: _openMap,
+        onProfileTap: _showAccountSheet,
       ),
     );
   }
@@ -2381,29 +2244,6 @@ class DashedBorderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => false;
-}
-
-Widget _actionChip({
-  required String label,
-  required VoidCallback onTap,
-}) {
-  return GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.red,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    ),
-  );
 }
 
 Widget _buildSwitchCard({
