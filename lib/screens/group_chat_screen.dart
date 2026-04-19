@@ -898,7 +898,9 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                               senderUid == 'rescuelink_ai';
                           final senderName = _uiDisplayName(
                             data['senderName'] as String?,
-                            fallback: 'Unknown',
+                            fallback: context
+                                .read<AppSettingsProvider>()
+                                .t('name_user'),
                           );
                           final rawText = (data['text'] as String?) ?? '';
                           final text = _translatedMessageTextById[docId] ?? rawText;
@@ -1110,7 +1112,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                               Flexible(
                                                 child: Text(
                                                   isAiMessage
-                                                      ? '$senderName • AI'
+                                                    ? '${context.read<AppSettingsProvider>().localizedDisplayName(senderName)} • ${context.read<AppSettingsProvider>().t('name_ai')}'
                                                       : senderName,
                                                   overflow:
                                                       TextOverflow.ellipsis,
@@ -1228,12 +1230,13 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                   ),
                 ),
               if (showJoinGate && _viewOverviewOnly)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.fromLTRB(12, 0, 12, 12),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child:
-                        Text('Overview-only mode. Join conversation to chat.'),
+                    child: Text(
+                      context.read<AppSettingsProvider>().t('chat_overview_only_hint'),
+                    ),
                   ),
                 ),
               if (!showJoinGate)
@@ -1614,7 +1617,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Pending Join Requests',
+            context.read<AppSettingsProvider>().t('chat_pending_join_requests'),
             style: Theme.of(context)
                 .textTheme
                 .titleSmall
@@ -1623,22 +1626,30 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           const SizedBox(height: 8),
           ...pending.map((req) {
             final uid = req['uid'] as String;
-            final name = req['displayName'] as String;
+            final name = _uiDisplayName(
+              req['displayName'] as String?,
+              fallback: context.read<AppSettingsProvider>().t('name_user'),
+            );
             return ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: CircleAvatar(child: Text(name[0].toUpperCase())),
+              leading: CircleAvatar(
+                child: Text(
+                  name.isNotEmpty ? name[0].toUpperCase() :
+                      context.read<AppSettingsProvider>().t('name_user')[0].toUpperCase(),
+                ),
+              ),
               title: Text(name),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextButton(
                     onPressed: () => _handleJoinRequest(uid, name, 'rejected'),
-                    child: const Text('Reject',
+                    child: Text(context.read<AppSettingsProvider>().t('button_reject'),
                         style: TextStyle(color: Colors.red)),
                   ),
                   FilledButton(
                     onPressed: () => _handleJoinRequest(uid, name, 'approved'),
-                    child: const Text('Approve'),
+                    child: Text(context.read<AppSettingsProvider>().t('button_accept')),
                   ),
                 ],
               ),
@@ -1661,8 +1672,20 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         request: {'uid': uid, 'displayName': name},
         approved: status == 'approved',
       );
-      messenger
-          .showSnackBar(SnackBar(content: Text('Request $status for $name')));
+      final localizedStatus = status == 'approved'
+          ? context.read<AppSettingsProvider>().t('status_approved')
+          : context.read<AppSettingsProvider>().t('status_rejected');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            context
+                .read<AppSettingsProvider>()
+                .t('chat_request_status')
+                .replaceAll('{status}', localizedStatus)
+                .replaceAll('{name}', name),
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -1676,6 +1699,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     required List<Map<String, dynamic>> joinRequests,
     required bool isCancelled,
   }) {
+    final settings = context.read<AppSettingsProvider>();
     final isBlocked = blockedUids.contains(widget.currentUserId);
     final requestStatus = _latestJoinRequestStatus(
       joinRequests: joinRequests,
@@ -1690,7 +1714,9 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Participants (${participants.length})',
+              settings
+                  .t('chat_participants_count')
+                  .replaceAll('{count}', '${participants.length}'),
               style: Theme.of(context)
                   .textTheme
                   .titleSmall
@@ -1698,7 +1724,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             ),
             const SizedBox(height: 8),
             if (participants.isEmpty)
-              const Text('No participants yet')
+              Text(settings.t('chat_no_participants_yet'))
             else
               Wrap(
                 spacing: 8,
@@ -1710,10 +1736,12 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                     entry['displayName'] as String?,
                     fallback: uid,
                   );
-                  final label =
-                      entry['isAi'] == true ? 'RescueLink AI' : displayName;
+                  final label = entry['isAi'] == true
+                      ? settings.t('chat_rescue_link_ai')
+                      : displayName;
+                  final localizedRole = settings.localizedDisplayName(role);
                   return ActionChip(
-                    label: Text('$label ($role)'),
+                    label: Text('$label ($localizedRole)'),
                     onPressed: entry['isAi'] == true
                         ? null
                         : () => _showResponderProfile(uid),
@@ -1749,26 +1777,29 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                         )
                       : Text(
                           requestStatus == 'pending'
-                              ? 'Request Pending'
+                              ? settings.t('chat_join_request_pending')
                               : requestStatus == 'rejected'
-                                  ? 'Permanently Blocked'
+                                  ? settings.t('chat_join_permanently_blocked')
                                   : isBlocked
-                                      ? 'Request to Join'
-                                      : 'Join Conversation',
+                                      ? settings.t('chat_join_request_to_join')
+                                      : settings.t('chat_join_conversation'),
                         ),
                 ),
-                OutlinedButton(
-                  onPressed: isCancelled
-                      ? null
-                      : () {
-                          setState(() {
-                            _viewOverviewOnly = !_viewOverviewOnly;
-                          });
-                        },
-                  child: Text(
-                    _viewOverviewOnly
-                        ? 'View Chat Preview'
-                        : 'View Overview Only',
+                Tooltip(
+                  message: settings.t('chat_toggle_overview_tooltip'),
+                  child: OutlinedButton(
+                    onPressed: isCancelled
+                        ? null
+                        : () {
+                            setState(() {
+                              _viewOverviewOnly = !_viewOverviewOnly;
+                            });
+                          },
+                    child: Text(
+                      _viewOverviewOnly
+                          ? settings.t('chat_view_chat_preview')
+                          : settings.t('chat_view_overview_only'),
+                    ),
                   ),
                 ),
               ],
@@ -1817,10 +1848,22 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         responderUid: widget.currentUserId,
         responderName: widget.currentUserName,
       );
-      messenger.showSnackBar(
-          const SnackBar(content: Text('Join request sent to victim.')));
+      messenger.showSnackBar(SnackBar(
+        content: Text(
+          context.read<AppSettingsProvider>().t('chat_join_request_sent'),
+        ),
+      ));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed to request: $e')));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            context
+                .read<AppSettingsProvider>()
+                .t('chat_failed_request')
+                .replaceAll('{error}', '$e'),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isJoining = false);
     }
@@ -2036,7 +2079,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
               ),
               const SizedBox(height: 10),
               if (responders.isEmpty)
-                const Text('No responders have joined yet.')
+                Text(context.read<AppSettingsProvider>().t('chat_no_participants_yet'))
               else
                 Expanded(
                   child: ListView.builder(
@@ -2046,7 +2089,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                       final responderUid = (p['uid'] as String?) ?? '';
                       final isAi = (p['isAi'] as bool?) ?? false;
                       final name = _uiDisplayName(p['displayName'] as String?,
-                          fallback: 'Responder');
+                          fallback: context.read<AppSettingsProvider>().t('name_responder'));
                       return ListTile(
                         leading: GestureDetector(
                           onTap: () {
@@ -2540,7 +2583,9 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     required bool hasImageAttachment,
     required bool hasAudioAttachment,
   }) {
-    final senderLabel = isAiMessage ? '$senderName, AI assistant' : senderName;
+    final senderLabel = isAiMessage
+        ? '$senderName, ${context.read<AppSettingsProvider>().t('chat_ai_assistant_label')}'
+        : senderName;
     final timeLabel = createdAt == null ? '' : ' at ${_timeText(createdAt)}';
     final parts = <String>['Message from $senderLabel$timeLabel'];
     final safeText = _cleanAiMessageForVoiceAndSemantics(text);
@@ -4147,11 +4192,12 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   String _uiDisplayName(String? raw, {required String fallback}) {
     final trimmed = raw?.trim();
     final base = (trimmed == null || trimmed.isEmpty) ? fallback : trimmed;
+    final localized = context.read<AppSettingsProvider>().localizedDisplayName(base);
     const maxUiNameLength = 40;
-    if (base.length <= maxUiNameLength) {
-      return base;
+    if (localized.length <= maxUiNameLength) {
+      return localized;
     }
-    return '${base.substring(0, maxUiNameLength)}...';
+    return '${localized.substring(0, maxUiNameLength)}...';
   }
 }
 

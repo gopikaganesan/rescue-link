@@ -64,7 +64,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
     }
 
     final uri = Uri.parse(
-      'sms:$phone?body=${Uri.encodeComponent('Hi ${widget.responder.name}, this is RescueLink. An SOS request may need your help.')}',
+      'sms:$phone?body=${Uri.encodeComponent(settings.t('profile_sms_template').replaceAll('{name}', settings.localizedDisplayName(widget.responder.name)))}',
     );
 
     if (await canLaunchUrl(uri)) {
@@ -124,7 +124,12 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(settings.t('profile_review_title').replaceAll('{name}', widget.responder.name)),
+          title: Text(
+            settings.t('profile_review_title').replaceAll(
+              '{name}',
+              settings.localizedDisplayName(widget.responder.name),
+            ),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -226,7 +231,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                       });
                       final updatePayload = <String, dynamic>{
                         'reviewerUid': currentUserId,
-                        'reviewerName': widget.currentUserName ?? 'Anonymous',
+                        'reviewerName': widget.currentUserName ?? settings.t('name_anonymous'),
                         'responderUid': widget.responder.id,
                         'responderName': widget.responder.name,
                         'review': reviewText.trim(),
@@ -303,6 +308,9 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
     final isAi = widget.responder.id == 'rescuelink_ai';
+    final responderDisplayName = isAi
+        ? settings.t('chat_rescue_link_ai')
+        : settings.localizedDisplayName(widget.responder.name);
     final verificationText = widget.responder.verifiedResponder
       ? settings.t('profile_verified_responder')
       : settings.t('profile_not_verified_yet');
@@ -380,7 +388,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  widget.responder.name,
+                                  responderDisplayName,
                                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                                         color: Colors.white,
                                         fontWeight: FontWeight.w700,
@@ -486,9 +494,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                         color: Colors.blue.shade50,
                         borderRadius: BorderRadius.circular(18),
                       ),
-                      child: const Text(
-                        'This is your responder profile view.',
-                      ),
+                      child: Text(settings.t('profile_this_is_your_view')),
                     )
                   else
                     Wrap(
@@ -553,7 +559,12 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                       final rev = reviewData[index];
                       final rating = (rev['rating'] as num?)?.toDouble() ?? 0;
                       final text = rev['review'] as String? ?? '';
-                      final name = rev['reviewerName'] as String? ?? 'Anonymous';
+                      final rawName = rev['reviewerName'] as String?;
+                      final name = settings.localizedDisplayName(
+                        (rawName == null || rawName.trim().isEmpty)
+                            ? settings.t('name_anonymous')
+                            : rawName,
+                      );
                       final date = rev['updatedAt'] is Timestamp 
                           ? (rev['updatedAt'] as Timestamp).toDate() 
                           : DateTime.now();

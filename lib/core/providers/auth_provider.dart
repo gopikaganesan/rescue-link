@@ -91,7 +91,7 @@ class AuthProvider extends ChangeNotifier {
           'email': user.email ?? (data['email'] as String? ?? ''),
           'phoneNumber': user.phoneNumber ?? (data['phoneNumber'] as String?),
           'displayName':
-              user.displayName ?? (data['displayName'] as String? ?? 'RescueLink User'),
+              user.displayName ?? (data['displayName'] as String? ?? 'user'),
           'isAnonymous': user.isAnonymous,
           'createdAt': DateTime.now(),
         });
@@ -100,7 +100,7 @@ class AuthProvider extends ChangeNotifier {
           id: user.uid,
           email: user.email ?? '',
           phoneNumber: user.phoneNumber,
-          displayName: user.displayName ?? 'RescueLink User',
+          displayName: user.displayName ?? 'user',
           isAnonymous: user.isAnonymous,
           createdAt: DateTime.now(),
         );
@@ -112,7 +112,7 @@ class AuthProvider extends ChangeNotifier {
         id: user.uid,
         email: user.email ?? '',
         phoneNumber: user.phoneNumber,
-        displayName: user.displayName ?? 'RescueLink User',
+        displayName: user.displayName ?? 'user',
         isAnonymous: user.isAnonymous,
         createdAt: DateTime.now(),
       );
@@ -355,7 +355,7 @@ class AuthProvider extends ChangeNotifier {
             'email': user.email ?? '',
             'phoneNumber': user.phoneNumber ?? currentUser?.phoneNumber,
             'displayName':
-                user.displayName ?? currentUser?.displayName ?? 'RescueLink User',
+              user.displayName ?? currentUser?.displayName ?? 'user',
             'isAnonymous': user.isAnonymous,
             'createdAt': FieldValue.serverTimestamp(),
           },

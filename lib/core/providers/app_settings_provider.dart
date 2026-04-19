@@ -7,8 +7,35 @@ class AppSettingsProvider extends ChangeNotifier {
     configureForLocale(PlatformDispatcher.instance.locale);
   }
 
+  static const List<String> _indiaOfficialLanguageCodes = <String>[
+    'en',
+    'hi',
+    'as',
+    'bn',
+    'brx',
+    'doi',
+    'gu',
+    'kn',
+    'ks',
+    'kok',
+    'mai',
+    'ml',
+    'mni',
+    'mr',
+    'ne',
+    'or',
+    'pa',
+    'sa',
+    'sat',
+    'sd',
+    'ta',
+    'te',
+    'ur',
+  ];
+
   String _languageCode = 'en';
-  List<String> _availableLanguageCodes = <String>['en', 'hi', 'ta'];
+  List<String> _availableLanguageCodes = List<String>.from(_indiaOfficialLanguageCodes);
+  bool _showAllLanguages = false;
   double _textScaleFactor = 1.0;
   bool _hapticsEnabled = true;
   bool _sosFlashEnabled = false;
@@ -16,7 +43,7 @@ class AppSettingsProvider extends ChangeNotifier {
   bool _notificationsEnabled = true;
 
   static const Map<String, List<String>> _regionLanguagePresets = <String, List<String>>{
-    'IN:en': <String>['en', 'hi', 'ta', 'ml', 'mr', 'te', 'kn', 'bn', 'gu', 'pa', 'or'],
+    'IN:en': _indiaOfficialLanguageCodes,
     'IN:hi': <String>['hi', 'en', 'ta', 'te', 'kn'],
     'IN:ta': <String>['ta', 'en', 'hi', 'ml', 'te'],
     'IN:te': <String>['te', 'en', 'hi', 'ta', 'kn'],
@@ -35,14 +62,26 @@ class AppSettingsProvider extends ChangeNotifier {
   static const Map<String, String> _languageLabels = {
     'en': 'English',
     'hi': 'Hindi',
+    'as': 'Assamese',
     'bn': 'Bengali',
+    'brx': 'Bodo',
+    'doi': 'Dogri',
     'gu': 'Gujarati',
     'kn': 'Kannada',
+    'ks': 'Kashmiri',
+    'kok': 'Konkani',
+    'mai': 'Maithili',
+    'mni': 'Manipuri',
     'mr': 'Marathi',
+    'ne': 'Nepali',
     'or': 'Odia',
     'pa': 'Punjabi',
+    'sa': 'Sanskrit',
+    'sat': 'Santali',
+    'sd': 'Sindhi',
     'ta': 'Tamil',
     'te': 'Telugu',
+    'ur': 'Urdu',
     'ml': 'Malayalam',
     'zh': 'Chinese',
     'ja': 'Japanese',
@@ -52,14 +91,26 @@ class AppSettingsProvider extends ChangeNotifier {
   static const Map<String, String> _nativeLanguageLabels = {
     'en': 'English',
     'hi': 'हिंदी',
+    'as': 'অসমীয়া',
     'bn': 'বাংলা',
+    'brx': 'बड़ो',
+    'doi': 'डोगरी',
     'gu': 'ગુજરાતી',
     'kn': 'ಕನ್ನಡ',
+    'ks': 'कश्मीरी',
+    'kok': 'कोंकणी',
+    'mai': 'मैथिली',
+    'mni': 'ꯃꯤꯇꯩ ꯂꯣꯟ',
     'mr': 'मराठी',
+    'ne': 'नेपाली',
     'or': 'ଓଡ଼ିଆ',
     'pa': 'ਪੰਜਾਬੀ',
+    'sa': 'संस्कृतम्',
+    'sat': 'ᱥᱟᱱᱛᱟᱲᱤ',
+    'sd': 'سنڌي',
     'ta': 'தமிழ்',
     'te': 'తెలుగు',
+    'ur': 'اردو',
     'ml': 'മലയാളം',
     'zh': '中文',
     'ja': '日本語',
@@ -76,6 +127,7 @@ class AppSettingsProvider extends ChangeNotifier {
   bool get sosFlashEnabled => _sosFlashEnabled;
   bool get highContrastEnabled => _highContrastEnabled;
   bool get notificationsEnabled => _notificationsEnabled;
+  bool get showAllLanguages => _showAllLanguages;
 
   String languageLabel(String code) {
     final native = _nativeLanguageLabels[code] ?? code;
@@ -242,6 +294,9 @@ class AppSettingsProvider extends ChangeNotifier {
       'chat_tap_avatar_profile': 'Tap avatar for profile',
       'chat_ai_cannot_review': 'AI Assistant cannot be reviewed.',
       'chat_request_status': 'Request {status} for {name}',
+      'chat_pending_join_requests': 'Pending Join Requests',
+      'status_approved': 'Approved',
+      'status_rejected': 'Rejected',
       'chat_view_profile': 'View Profile',
       'chat_review_name': 'Review {name}',
       'chat_describe_experience': 'Describe your experience...',
@@ -252,6 +307,22 @@ class AppSettingsProvider extends ChangeNotifier {
       'chat_request_status_snackbar': 'Request {status} for {name}',
       'chat_ai_assistant_label': 'AI assistant',
       'chat_rescue_link_ai': 'RescueLink AI',
+      'chat_title_emergency_with_name': 'Emergency: {name}',
+      'chat_title_crisis_emergency': '{crisis} emergency',
+      'chat_title_emergency_chat': 'Emergency chat {id}',
+      'name_victim': 'Victim',
+      'name_responder': 'Responder',
+      'name_user': 'User',
+      'name_ai': 'AI',
+      'name_anonymous': 'Anonymous',
+      'home_emergency_info_title': 'Emergency info',
+      'home_ai_status': 'AI status: {status}',
+      'home_ai_status_gemini_success': 'Gemini API response received',
+      'home_ai_status_missing_api_key': 'Gemini key missing, local fallback used',
+      'home_ai_status_forced_offline': 'Simulation mode forced local fallback',
+      'home_ai_status_empty_response': 'Gemini returned empty response, local fallback used',
+      'home_ai_status_gemini_error': 'Gemini call failed, local fallback used',
+      'home_ai_status_local_heuristic': 'Local heuristic response',
       // Labels
       'label_text_size': 'Text Size',
       'label_haptics': 'Haptics',
@@ -300,6 +371,7 @@ class AppSettingsProvider extends ChangeNotifier {
       'map_no_responders_nearby': 'No responders nearby',
       'map_away_km': '{distance} km away',
       'map_view_profile': 'View profile',
+      'profile_sms_template': 'Hi {name}, this is RescueLink. An SOS request may need your help.',
       // Menu items
       'menu_disable_notifications': 'Disable notifications for this chat',
       'menu_enable_notifications': 'Enable notifications for this chat',
@@ -364,6 +436,19 @@ class AppSettingsProvider extends ChangeNotifier {
       'chat_delete_chat_victim': 'Delete Chat (Victim)',
       'chat_leave_chat_responder': 'Leave Chat (Responder)',
       'chat_active_responders': 'Active Responders ({count})',
+      'chat_participants_count': 'Participants ({count})',
+      'chat_no_participants_yet': 'No participants yet',
+      'chat_overview_only_hint': 'Overview-only mode. Join conversation to chat.',
+      'chat_view_chat_preview': 'View Chat Preview',
+      'chat_view_overview_only': 'View Overview Only',
+      'chat_toggle_overview_tooltip': 'Toggle overview-only mode',
+      'chat_join_request_pending': 'Request Pending',
+      'chat_join_permanently_blocked': 'Permanently Blocked',
+      'chat_join_request_to_join': 'Request to Join',
+      'chat_join_conversation': 'Join Conversation',
+      'chat_join_request_sent': 'Join request sent to victim.',
+      'chat_failed_request': 'Failed to request: {error}',
+      'name_participant': 'Participant',
       'button_responder_dashboard': 'Responder Dashboard',
       'label_emergency_details_optional': 'Emergency details (optional)',
       'hint_emergency_details_example': 'Example: elderly person fell, flood nearby, child missing, no transport',
@@ -388,6 +473,8 @@ class AppSettingsProvider extends ChangeNotifier {
       'chat_emergency_overview': 'Emergency Overview',
       'home_select_language': 'Select Language',
       'home_choose_preferred_language': 'Choose your preferred language',
+      'home_show_all_languages': 'Show all official Indian languages',
+      'home_show_all_languages_hint': 'Turn on to display the full language list',
       'account_anonymous_session': 'Anonymous Session',
       'account_registered_account': 'Registered Account',
       'account_signin_create': 'Sign In / Create Account',
@@ -445,6 +532,21 @@ class AppSettingsProvider extends ChangeNotifier {
       'create_account': 'खाता बनाएं',
       'continue_guest': 'गेस्ट के रूप में जारी रखें',
       'language': 'भाषा',
+      'auth_sign_in_title': 'RescueLink में साइन इन करें',
+      'auth_create_account_prompt': 'खाता बनाएं',
+      'auth_already_have_account': 'पहले से खाता है? साइन इन करें',
+      'auth_need_account': 'खाता चाहिए? नया बनाएं',
+      'auth_display_name': 'डिस्प्ले नाम',
+      'auth_phone_number': 'फ़ोन नंबर (वैकल्पिक, रिस्पॉन्डर ऑटो-फिल के लिए)',
+      'auth_email': 'ईमेल',
+      'auth_password': 'पासवर्ड',
+      'auth_enter_display_name': 'अपना डिस्प्ले नाम दर्ज करें',
+      'auth_enter_email': 'अपना ईमेल दर्ज करें',
+      'auth_enter_valid_email': 'मान्य ईमेल दर्ज करें',
+      'auth_password_min_length': 'पासवर्ड कम से कम 6 अक्षरों का होना चाहिए',
+      'auth_phone_otp_disabled': 'इस बिल्ड में बिलिंग निर्भरता से बचने के लिए फोन OTP लॉगिन अभी अक्षम है। ईमेल और वैकल्पिक फोन नंबर के साथ पंजीकरण करें।',
+      'auth_no_email': 'कोई ईमेल नहीं',
+      'auth_app_user': 'RescueLink उपयोगकर्ता',
       // Button labels
       'button_cancel_sos': 'SOS रद्द करें',
       'button_view_map': 'मानचित्र देखें',
@@ -528,6 +630,18 @@ class AppSettingsProvider extends ChangeNotifier {
       'sos_button_accessibility_label': 'आपातकालीन SOS बटन',
       'sos_button_accessibility_hint': 'नज़दीकी रिस्पॉन्डर्स को अलर्ट करने के लिए टैप करें। लंबा दबाने पर रद्द करें।',
       'profile_this_is_your_view': 'यह आपका रिस्पॉन्डर प्रोफ़ाइल दृश्य है।',
+      'profile_my_responder_profile': 'मेरा रिस्पॉन्डर प्रोफ़ाइल',
+      'profile_ai_assistant': 'AI सहायक प्रोफ़ाइल',
+      'profile_responder_profile': 'रिस्पॉन्डर प्रोफ़ाइल',
+      'profile_verified_responder': 'सत्यापित रिस्पॉन्डर',
+      'profile_not_verified_yet': 'अभी तक सत्यापित नहीं',
+      'profile_available_now': 'अभी उपलब्ध',
+      'profile_currently_offline': 'वर्तमान में ऑफ़लाइन',
+      'profile_rescues': 'रेस्क्यू',
+      'profile_rating': 'रेटिंग',
+      'profile_reviews': 'समीक्षाएँ',
+      'profile_identity': 'पहचान',
+      'profile_contact': 'संपर्क',
       'profile_call': 'कॉल',
       'profile_message': 'संदेश',
       'profile_community_reviews': 'समुदाय समीक्षा',
@@ -628,6 +742,54 @@ class AppSettingsProvider extends ChangeNotifier {
       'chat_delete_chat_victim': 'चैट हटाएं (पीड़ित)',
       'chat_leave_chat_responder': 'चैट छोड़ें (प्रतिक्रिया कर्ता)',
       'chat_active_responders': 'सक्रिय प्रतिक्रियाशील ({count})',
+      'chat_pending_join_requests': 'लंबित जॉइन अनुरोध',
+      'status_approved': 'स्वीकृत',
+      'status_rejected': 'अस्वीकृत',
+      'chat_participants_count': 'प्रतिभागी ({count})',
+      'chat_no_participants_yet': 'अभी कोई प्रतिभागी नहीं',
+      'chat_overview_only_hint': 'केवल अवलोकन मोड। चैट करने के लिए वार्तालाप में शामिल हों।',
+      'chat_view_chat_preview': 'चैट पूर्वावलोकन देखें',
+      'chat_view_overview_only': 'केवल अवलोकन देखें',
+      'chat_toggle_overview_tooltip': 'केवल अवलोकन मोड बदलें',
+      'chat_join_request_pending': 'अनुरोध लंबित',
+      'chat_join_permanently_blocked': 'स्थायी रूप से अवरुद्ध',
+      'chat_join_request_to_join': 'शामिल होने का अनुरोध',
+      'chat_join_conversation': 'वार्तालाप में शामिल हों',
+      'chat_join_request_sent': 'जॉइन अनुरोध पीड़ित को भेज दिया गया।',
+      'chat_failed_request': 'अनुरोध विफल: {error}',
+      'name_participant': 'प्रतिभागी',
+      'chat_rescue_link_ai': 'RescueLink AI',
+      'chat_title_emergency_with_name': 'आपातकाल: {name}',
+      'chat_title_crisis_emergency': '{crisis} आपातकाल',
+      'chat_title_emergency_chat': 'आपातकाल चैट {id}',
+      'name_victim': 'पीड़ित',
+      'name_responder': 'रिस्पॉन्डर',
+      'name_user': 'उपयोगकर्ता',
+      'name_ai': 'एआई',
+      'name_anonymous': 'गुमनाम',
+      'home_emergency_info_title': 'आपातकाल जानकारी',
+      'home_ai_status': 'AI स्थिति: {status}',
+      'home_ai_status_gemini_success': 'Gemini API से प्रतिक्रिया प्राप्त हुई',
+      'home_ai_status_missing_api_key': 'Gemini कुंजी नहीं मिली, स्थानीय फॉलबैक उपयोग हुआ',
+      'home_ai_status_forced_offline': 'सिमुलेशन मोड ने स्थानीय फॉलबैक को मजबूर किया',
+      'home_ai_status_empty_response': 'Gemini ने खाली प्रतिक्रिया दी, स्थानीय फॉलबैक उपयोग हुआ',
+      'home_ai_status_gemini_error': 'Gemini कॉल विफल, स्थानीय फॉलबैक उपयोग हुआ',
+      'home_ai_status_local_heuristic': 'स्थानीय हीयूरिस्टिक प्रतिक्रिया',
+      'map_navigation_map': 'नेविगेशन मानचित्र',
+      'map_responders_map': 'रिस्पॉन्डर मानचित्र',
+      'map_center_location': 'मेरी लोकेशन पर केंद्रित करें',
+      'map_location_not_available': 'लोकेशन उपलब्ध नहीं है',
+      'map_turn_on_location': 'लोकेशन चालू करें',
+      'map_grant_permission': 'अनुमति दें',
+      'map_retry': 'पुनः प्रयास करें',
+      'map_destination': 'गंतव्य: {title}',
+      'map_help_request': 'मदद अनुरोध',
+      'map_nearby_responders': 'नज़दीकी रिस्पॉन्डर (5 किमी दायरा)',
+      'map_open_navigation': 'टर्न-बाय-टर्न नेविगेशन खोलें',
+      'map_no_responders_nearby': 'नज़दीक कोई रिस्पॉन्डर नहीं',
+      'map_away_km': '{distance} किमी दूर',
+      'map_view_profile': 'प्रोफ़ाइल देखें',
+      'profile_sms_template': 'नमस्ते {name}, यह RescueLink है। किसी SOS अनुरोध को आपकी सहायता की आवश्यकता हो सकती है।',
       'button_responder_dashboard': 'प्रतिक्रिया कर्ता डैशबोर्ड',
       'label_emergency_details_optional': 'आपातकालीन विवरण (वैकल्पिक)',
       'hint_emergency_details_example': 'उदाहरण: वृद्ध व्यक्ति गिरा, बाढ़ नजदीक, बच्चा गुम, कोई परिवहन नहीं',
@@ -652,6 +814,8 @@ class AppSettingsProvider extends ChangeNotifier {
       'chat_emergency_overview': 'आपातकालीन अवलोकन',
       'home_select_language': 'भाषा चुनें',
       'home_choose_preferred_language': 'अपनी पसंदीदा भाषा चुनें',
+      'home_show_all_languages': 'भारत की सभी आधिकारिक भाषाएँ दिखाएँ',
+      'home_show_all_languages_hint': 'पूर्ण भाषा सूची दिखाने के लिए इसे चालू करें',
       'account_anonymous_session': 'गुमनाम सत्र',
       'account_registered_account': 'पंजीकृत खाता',
       'account_signin_create': 'साइन इन / खाता बनाएं',
@@ -709,6 +873,21 @@ class AppSettingsProvider extends ChangeNotifier {
       'create_account': 'கணக்கு உருவாக்கு',
       'language': 'மொழி',
       'continue_guest': 'விருந்தினராக தொடரவும்',
+      'auth_sign_in_title': 'RescueLink இல் உள்நுழைக',
+      'auth_create_account_prompt': 'கணக்கு உருவாக்கு',
+      'auth_already_have_account': 'ஏற்கனவே கணக்கு உள்ளதா? உள்நுழைக',
+      'auth_need_account': 'கணக்கு வேண்டுமா? புதிதாக உருவாக்கவும்',
+      'auth_display_name': 'காட்சி பெயர்',
+      'auth_phone_number': 'தொலைபேசி எண் (விருப்பம், பதிலளிப்பவர் தானியங்கி நிரப்புக்கு)',
+      'auth_email': 'மின்னஞ்சல்',
+      'auth_password': 'கடவுச்சொல்',
+      'auth_enter_display_name': 'உங்கள் காட்சி பெயரை உள்ளிடவும்',
+      'auth_enter_email': 'உங்கள் மின்னஞ்சலை உள்ளிடவும்',
+      'auth_enter_valid_email': 'சரியான மின்னஞ்சலை உள்ளிடவும்',
+      'auth_password_min_length': 'கடவுச்சொல் குறைந்தது 6 எழுத்துகள் இருக்க வேண்டும்',
+      'auth_phone_otp_disabled': 'பில்லிங் சார்பினை தவிர்க்க இந்த build-இல் phone OTP login தற்காலிகமாக முடக்கப்பட்டுள்ளது. மின்னஞ்சல் மற்றும் விருப்ப தொலைபேசி எண்ணுடன் பதிவு செய்யவும்.',
+      'auth_no_email': 'மின்னஞ்சல் இல்லை',
+      'auth_app_user': 'RescueLink பயனர்',
       // Button labels
       'button_cancel_sos': 'SOS ரத்து செய்யவும்',
       'button_view_map': 'வரைபடத்தைக் காட்டவும்',
@@ -792,6 +971,18 @@ class AppSettingsProvider extends ChangeNotifier {
       'sos_button_accessibility_label': 'அவசர SOS பொத்தான்',
       'sos_button_accessibility_hint': 'அருகிலுள்ள பதிலளிப்போருக்கு எச்சரிக்க தொடவும். நீண்ட அழுத்தத்தில் ரத்து செய்யவும்.',
       'profile_this_is_your_view': 'இது உங்கள் பதிலளிப்பவர் சுயவிவர காட்சி.',
+      'profile_my_responder_profile': 'என் பதிலளிப்பவர் சுயவிவரம்',
+      'profile_ai_assistant': 'AI உதவியாளர் சுயவிவரம்',
+      'profile_responder_profile': 'பதிலளிப்பவர் சுயவிவரம்',
+      'profile_verified_responder': 'சரிபார்க்கப்பட்ட பதிலளிப்பவர்',
+      'profile_not_verified_yet': 'இன்னும் சரிபார்க்கப்படவில்லை',
+      'profile_available_now': 'இப்போது கிடைக்கின்றார்',
+      'profile_currently_offline': 'தற்போது ஆஃப்லைன்',
+      'profile_rescues': 'மீட்புகள்',
+      'profile_rating': 'மதிப்பீடு',
+      'profile_reviews': 'விமர்சனங்கள்',
+      'profile_identity': 'அடையாளம்',
+      'profile_contact': 'தொடர்பு',
       'profile_call': 'அழைப்பு',
       'profile_message': 'செய்தி',
       'profile_community_reviews': 'சமுதாய விமர்சனங்கள்',
@@ -892,6 +1083,54 @@ class AppSettingsProvider extends ChangeNotifier {
       'chat_delete_chat_victim': 'அரட்டை நீக்கு (பாதிக்கப்பட்டவர்)',
       'chat_leave_chat_responder': 'அரட்டையை விட்டு வெளியேறு (பதிலளிப்பவர்)',
       'chat_active_responders': 'செயலில் உள்ள பதிலளிப்பவர்கள் ({count})',
+      'chat_pending_join_requests': 'நிலுவையில் உள்ள சேரும் கோரிக்கைகள்',
+      'status_approved': 'ஏற்கப்பட்டது',
+      'status_rejected': 'நிராகரிக்கப்பட்டது',
+      'chat_participants_count': 'பங்கேற்பாளர்கள் ({count})',
+      'chat_no_participants_yet': 'இன்னும் பங்கேற்பாளர்கள் இல்லை',
+      'chat_overview_only_hint': 'மேலோட்டம் மட்டும். அரட்டை செய்ய உரையாடலில் சேரவும்.',
+      'chat_view_chat_preview': 'அரட்டை முன்னோட்டம் பார்க்க',
+      'chat_view_overview_only': 'மேலோட்டம் மட்டும் பார்க்க',
+      'chat_toggle_overview_tooltip': 'மேலோட்டம் மட்டும் நிலையை மாற்று',
+      'chat_join_request_pending': 'கோரிக்கை நிலுவையில் உள்ளது',
+      'chat_join_permanently_blocked': 'நிரந்தரமாக தடுக்கப்பட்டது',
+      'chat_join_request_to_join': 'சேர கோரிக்கை',
+      'chat_join_conversation': 'உரையாடலில் சேரவும்',
+      'chat_join_request_sent': 'சேரும் கோரிக்கை பாதிக்கப்பட்டவருக்கு அனுப்பப்பட்டது.',
+      'chat_failed_request': 'கோரிக்கை தோல்வியடைந்தது: {error}',
+      'name_participant': 'பங்கேற்பாளர்',
+      'chat_rescue_link_ai': 'RescueLink AI',
+      'chat_title_emergency_with_name': 'அவசரம்: {name}',
+      'chat_title_crisis_emergency': '{crisis} அவசரம்',
+      'chat_title_emergency_chat': 'அவசர அரட்டை {id}',
+      'name_victim': 'பாதிக்கப்பட்டவர்',
+      'name_responder': 'பதிலளிப்பவர்',
+      'name_user': 'பயனர்',
+      'name_ai': 'AI',
+      'name_anonymous': 'அடையாளம் தெரியாதவர்',
+      'home_emergency_info_title': 'அவசர தகவல்',
+      'home_ai_status': 'AI நிலை: {status}',
+      'home_ai_status_gemini_success': 'Gemini API பதில் பெறப்பட்டது',
+      'home_ai_status_missing_api_key': 'Gemini திறவுகோல் இல்லை, உள்ளக மாற்று பயன்படுத்தப்பட்டது',
+      'home_ai_status_forced_offline': 'சிமுலேஷன் முறை உள்ளக மாற்றை கட்டாயப்படுத்தியது',
+      'home_ai_status_empty_response': 'Gemini காலியான பதிலை வழங்கியது, உள்ளக மாற்று பயன்படுத்தப்பட்டது',
+      'home_ai_status_gemini_error': 'Gemini அழைப்பு தோல்வி, உள்ளக மாற்று பயன்படுத்தப்பட்டது',
+      'home_ai_status_local_heuristic': 'உள்ளக heuristic பதில்',
+      'map_navigation_map': 'வழிசெலுத்தல் வரைபடம்',
+      'map_responders_map': 'பதிலளிப்பவர் வரைபடம்',
+      'map_center_location': 'என் இடத்தை மையப்படுத்து',
+      'map_location_not_available': 'இருப்பிடம் கிடைக்கவில்லை',
+      'map_turn_on_location': 'இருப்பிடத்தை இயக்கவும்',
+      'map_grant_permission': 'அனுமதி வழங்கவும்',
+      'map_retry': 'மீண்டும் முயற்சிக்கவும்',
+      'map_destination': 'இலக்கு: {title}',
+      'map_help_request': 'உதவி கோரிக்கை',
+      'map_nearby_responders': 'அருகிலுள்ள பதிலளிப்பவர்கள் (5 கிமீ வட்டாரம்)',
+      'map_open_navigation': 'திருப்பம்-திருப்பமாக வழிசெலுத்தலைத் திறக்கவும்',
+      'map_no_responders_nearby': 'அருகில் பதிலளிப்பவர்கள் இல்லை',
+      'map_away_km': '{distance} கிமீ தூரம்',
+      'map_view_profile': 'சுயவிவரம் பார்க்க',
+      'profile_sms_template': 'வணக்கம் {name}, இது RescueLink. ஒரு SOS கோரிக்கைக்கு உங்கள் உதவி தேவைப்படலாம்.',
       'button_responder_dashboard': 'பதிலளிப்பவர் டாஷ்போர்டு',
       'label_emergency_details_optional': 'அவசர விவரங்கள் (விருப்பத் தெரிவு)',
       'hint_emergency_details_example': 'உதாரணம்: முதியவர் விழுந்தார், πλημμύρα அருகே, குழந்தை காணவில்லை, போக்குவரத்து இல்லை',
@@ -916,6 +1155,8 @@ class AppSettingsProvider extends ChangeNotifier {
       'chat_emergency_overview': 'அவசர நிலை சுருக்கம்',
       'home_select_language': 'மொழியை தேர்வு செய்க',
       'home_choose_preferred_language': 'உங்கள் விருப்ப மொழியை தேர்வு செய்க',
+      'home_show_all_languages': 'இந்தியாவின் அனைத்து அதிகாரப்பூர்வ மொழிகளையும் காட்டு',
+      'home_show_all_languages_hint': 'முழு மொழி பட்டியலைக் காட்ட இதை இயக்கு',
       'account_anonymous_session': 'அடையாளமற்ற அமர்வு',
       'account_registered_account': 'பதிவு செய்யப்பட்ட கணக்கு',
       'account_signin_create': 'உள்நுழை / கணக்கு உருவாக்கு',
@@ -959,42 +1200,42 @@ class AppSettingsProvider extends ChangeNotifier {
       'status_no_sos_message_available': 'SOS செய்தி இல்லை',
     },
     'te': {
-      'app_title': 'RescueLink',
-      'emergency_prompt': 'In an Emergency?',
-      'emergency_subtitle': 'Press the SOS button below to alert nearby responders',
-      'become_responder': 'Become A Responder',
-      'location_ready': 'Location: Ready',
-      'location_not_ready': 'Location: Not Ready',
-      'user_info': 'User Info',
-      'total_responders': 'Total Responders',
-      'nearby_5km': 'Nearby (5km)',
+      'app_title': 'రెస్క్యూలింక్',
+      'emergency_prompt': 'అత్యవసర పరిస్థితిలో ఉన్నారా?',
+      'emergency_subtitle': 'సమీప స్పందకులను అప్రమత్తం చేయడానికి క్రింద ఉన్న SOS బటన్‌ను నొక్కండి',
+      'become_responder': 'స్పందకుడిగా మారండి',
+      'location_ready': 'స్థానం: సిద్ధంగా ఉంది',
+      'location_not_ready': 'స్థానం: సిద్ధంగా లేదు',
+      'user_info': 'వినియోగదారు సమాచారం',
+      'total_responders': 'మొత్తం స్పందకులు',
+      'nearby_5km': 'సమీపంలో (5 కి.మీ)',
       'sign_in_title': 'RescueLink సైన్ ఇన్',
-      'sign_in': 'Sign In',
-      'create_account': 'Create Account',
+      'sign_in': 'సైన్ ఇన్',
+      'create_account': 'ఖాతా సృష్టించండి',
       'continue_guest': 'గెస్ట్‌గా కొనసాగండి',
       'language': 'భాష',
-      'button_cancel_sos': 'Cancel SOS',
-      'button_view_map': 'View Map',
-      'button_open_chat': 'Open Chat',
-      'button_call_emergency': 'Call 112',
-      'button_sign_out': 'Sign Out',
-      'button_people_needing_help': 'People Needing Help',
-      'button_voice_test': 'Voice Test',
-      'button_flash_test': 'Flash Test',
-      'button_responder_register': 'Register as Responder',
-      'button_accept': 'Accept',
-      'button_reject': 'Reject',
-      'title_my_sos_chats': 'My SOS Chats',
-      'title_responder_alerts': 'Responder Alerts',
-      'title_map': 'Emergency Map',
-      'title_profile': 'Profile',
-      'title_settings': 'Settings',
-      'title_accessibility': 'Accessibility Settings',
-      'filter_active': 'Active',
-      'filter_cancelled': 'Cancelled',
-      'filter_all': 'All',
-      'hint_search_case': 'Search by case ID or message',
-      'hint_emergency_context': 'Describe emergency situation',
+      'button_cancel_sos': 'SOS రద్దు చేయండి',
+      'button_view_map': 'మ్యాప్ చూడండి',
+      'button_open_chat': 'చాట్ తెరవండి',
+      'button_call_emergency': '112 కు కాల్ చేయండి',
+      'button_sign_out': 'సైన్ అవుట్',
+      'button_people_needing_help': 'సహాయం అవసరమైన వ్యక్తులు',
+      'button_voice_test': 'వాయిస్ పరీక్ష',
+      'button_flash_test': 'ఫ్లాష్ పరీక్ష',
+      'button_responder_register': 'స్పందకుడిగా నమోదు చేయండి',
+      'button_accept': 'ఆమోదించండి',
+      'button_reject': 'తిరస్కరించండి',
+      'title_my_sos_chats': 'నా SOS చాట్‌లు',
+      'title_responder_alerts': 'స్పందకుల అలర్టులు',
+      'title_map': 'అత్యవసర మ్యాప్',
+      'title_profile': 'ప్రొఫైల్',
+      'title_settings': 'సెట్టింగులు',
+      'title_accessibility': 'యాక్సెసిబిలిటీ సెట్టింగులు',
+      'filter_active': 'సక్రియం',
+      'filter_cancelled': 'రద్దు చేయబడినవి',
+      'filter_all': 'అన్నీ',
+      'hint_search_case': 'కేస్ ID లేదా సందేశం ద్వారా శోధించండి',
+      'hint_emergency_context': 'అత్యవసర పరిస్థితిని వివరించండి',
       'label_text_size': 'Text Size',
       'label_haptics': 'Haptics',
       'label_high_contrast': 'High Contrast Mode',
@@ -1027,42 +1268,42 @@ class AppSettingsProvider extends ChangeNotifier {
       'menu_unmute': 'Unmute',
     },
     'kn': {
-      'app_title': 'RescueLink',
-      'emergency_prompt': 'In an Emergency?',
-      'emergency_subtitle': 'Press the SOS button below to alert nearby responders',
-      'become_responder': 'Become A Responder',
-      'location_ready': 'Location: Ready',
-      'location_not_ready': 'Location: Not Ready',
-      'user_info': 'User Info',
-      'total_responders': 'Total Responders',
-      'nearby_5km': 'Nearby (5km)',
+      'app_title': 'ರೆಸ್ಕ್ಯೂಲಿಂಕ್',
+      'emergency_prompt': 'ಅಪಾಯಕರ ಪರಿಸ್ಥಿತಿಯಲ್ಲಿದ್ದೀರಾ?',
+      'emergency_subtitle': 'ಹತ್ತಿರದ ಪ್ರತಿಕ್ರಿಯಾಕಾರರಿಗೆ ಸೂಚನೆ ನೀಡಲು ಕೆಳಗಿನ SOS ಬಟನ್ ಒತ್ತಿರಿ',
+      'become_responder': 'ಪ್ರತಿಕ್ರಿಯಾಕಾರರಾಗಿರಿ',
+      'location_ready': 'ಸ್ಥಳ: ಸಿದ್ಧ',
+      'location_not_ready': 'ಸ್ಥಳ: ಸಿದ್ಧವಿಲ್ಲ',
+      'user_info': 'ಬಳಕೆದಾರ ಮಾಹಿತಿ',
+      'total_responders': 'ಒಟ್ಟು ಪ್ರತಿಕ್ರಿಯಾಕಾರರು',
+      'nearby_5km': 'ಹತ್ತಿರ (5 ಕಿಮೀ)',
       'sign_in_title': 'RescueLink ಸೈನ್ ಇನ್',
-      'sign_in': 'Sign In',
-      'create_account': 'Create Account',
+      'sign_in': 'ಸೈನ್ ಇನ್',
+      'create_account': 'ಖಾತೆ ರಚಿಸಿ',
       'continue_guest': 'ಅತಿಥಿಯಾಗಿ ಮುಂದುವರಿಯಿರಿ',
       'language': 'ಭಾಷೆ',
-      'button_cancel_sos': 'Cancel SOS',
-      'button_view_map': 'View Map',
-      'button_open_chat': 'Open Chat',
-      'button_call_emergency': 'Call 112',
-      'button_sign_out': 'Sign Out',
-      'button_people_needing_help': 'People Needing Help',
-      'button_voice_test': 'Voice Test',
-      'button_flash_test': 'Flash Test',
-      'button_responder_register': 'Register as Responder',
-      'button_accept': 'Accept',
-      'button_reject': 'Reject',
-      'title_my_sos_chats': 'My SOS Chats',
-      'title_responder_alerts': 'Responder Alerts',
-      'title_map': 'Emergency Map',
-      'title_profile': 'Profile',
-      'title_settings': 'Settings',
-      'title_accessibility': 'Accessibility Settings',
-      'filter_active': 'Active',
-      'filter_cancelled': 'Cancelled',
-      'filter_all': 'All',
-      'hint_search_case': 'Search by case ID or message',
-      'hint_emergency_context': 'Describe emergency situation',
+      'button_cancel_sos': 'SOS ರದ್ದುಮಾಡಿ',
+      'button_view_map': 'ನಕ್ಷೆ ನೋಡಿ',
+      'button_open_chat': 'ಚಾಟ್ ತೆರೆಯಿರಿ',
+      'button_call_emergency': '112 ಗೆ ಕರೆಮಾಡಿ',
+      'button_sign_out': 'ಸೈನ್ ಔಟ್',
+      'button_people_needing_help': 'ಸಹಾಯ ಬೇಕಿರುವವರು',
+      'button_voice_test': 'ಧ್ವನಿ ಪರೀಕ್ಷೆ',
+      'button_flash_test': 'ಫ್ಲ್ಯಾಶ್ ಪರೀಕ್ಷೆ',
+      'button_responder_register': 'ಪ್ರತಿಕ್ರಿಯಾಕಾರರಾಗಿ ನೋಂದಣಿ ಮಾಡಿ',
+      'button_accept': 'ಸ್ವೀಕರಿಸಿ',
+      'button_reject': 'ತಿರಸ್ಕರಿಸಿ',
+      'title_my_sos_chats': 'ನನ್ನ SOS ಚಾಟ್‌ಗಳು',
+      'title_responder_alerts': 'ಪ್ರತಿಕ್ರಿಯಾಕಾರರ ಎಚ್ಚರಿಕೆಗಳು',
+      'title_map': 'ತುರ್ತು ನಕ್ಷೆ',
+      'title_profile': 'ಪ್ರೊಫೈಲ್',
+      'title_settings': 'ಸೆಟ್ಟಿಂಗ್‌ಗಳು',
+      'title_accessibility': 'ಪ್ರವೇಶಾತ್ಮಕತೆ ಸೆಟ್ಟಿಂಗ್‌ಗಳು',
+      'filter_active': 'ಸಕ್ರಿಯ',
+      'filter_cancelled': 'ರದ್ದು',
+      'filter_all': 'ಎಲ್ಲ',
+      'hint_search_case': 'ಕೇಸ್ ID ಅಥವಾ ಸಂದೇಶದಿಂದ ಹುಡುಕಿ',
+      'hint_emergency_context': 'ತುರ್ತು ಪರಿಸ್ಥಿತಿಯನ್ನು ವಿವರಿಸಿ',
       'label_text_size': 'Text Size',
       'label_haptics': 'Haptics',
       'label_high_contrast': 'High Contrast Mode',
@@ -1095,42 +1336,42 @@ class AppSettingsProvider extends ChangeNotifier {
       'menu_unmute': 'Unmute',
     },
     'bn': {
-      'app_title': 'RescueLink',
-      'emergency_prompt': 'In an Emergency?',
-      'emergency_subtitle': 'Press the SOS button below to alert nearby responders',
-      'become_responder': 'Become A Responder',
-      'location_ready': 'Location: Ready',
-      'location_not_ready': 'Location: Not Ready',
-      'user_info': 'User Info',
-      'total_responders': 'Total Responders',
-      'nearby_5km': 'Nearby (5km)',
+      'app_title': 'রেস্কিউলিঙ্ক',
+      'emergency_prompt': 'জরুরি অবস্থায় আছেন?',
+      'emergency_subtitle': 'কাছাকাছি সাড়া-দাতাদের সতর্ক করতে নিচের SOS বোতাম চাপুন',
+      'become_responder': 'সাড়া-দাতা হোন',
+      'location_ready': 'অবস্থান: প্রস্তুত',
+      'location_not_ready': 'অবস্থান: প্রস্তুত নয়',
+      'user_info': 'ব্যবহারকারীর তথ্য',
+      'total_responders': 'মোট সাড়া-দাতা',
+      'nearby_5km': 'কাছাকাছি (৫ কিমি)',
       'sign_in_title': 'RescueLink সাইন ইন',
-      'sign_in': 'Sign In',
-      'create_account': 'Create Account',
+      'sign_in': 'সাইন ইন',
+      'create_account': 'অ্যাকাউন্ট তৈরি করুন',
       'continue_guest': 'অতিথি হিসেবে চালিয়ে যান',
       'language': 'ভাষা',
-      'button_cancel_sos': 'Cancel SOS',
-      'button_view_map': 'View Map',
-      'button_open_chat': 'Open Chat',
-      'button_call_emergency': 'Call 112',
-      'button_sign_out': 'Sign Out',
-      'button_people_needing_help': 'People Needing Help',
-      'button_voice_test': 'Voice Test',
-      'button_flash_test': 'Flash Test',
-      'button_responder_register': 'Register as Responder',
-      'button_accept': 'Accept',
-      'button_reject': 'Reject',
-      'title_my_sos_chats': 'My SOS Chats',
-      'title_responder_alerts': 'Responder Alerts',
-      'title_map': 'Emergency Map',
-      'title_profile': 'Profile',
-      'title_settings': 'Settings',
-      'title_accessibility': 'Accessibility Settings',
-      'filter_active': 'Active',
-      'filter_cancelled': 'Cancelled',
-      'filter_all': 'All',
-      'hint_search_case': 'Search by case ID or message',
-      'hint_emergency_context': 'Describe emergency situation',
+      'button_cancel_sos': 'SOS বাতিল করুন',
+      'button_view_map': 'মানচিত্র দেখুন',
+      'button_open_chat': 'চ্যাট খুলুন',
+      'button_call_emergency': '১১২-এ কল করুন',
+      'button_sign_out': 'সাইন আউট',
+      'button_people_needing_help': 'যাদের সাহায্য দরকার',
+      'button_voice_test': 'ভয়েস টেস্ট',
+      'button_flash_test': 'ফ্ল্যাশ টেস্ট',
+      'button_responder_register': 'সাড়া-দাতা হিসেবে নিবন্ধন করুন',
+      'button_accept': 'গ্রহণ করুন',
+      'button_reject': 'প্রত্যাখ্যান করুন',
+      'title_my_sos_chats': 'আমার SOS চ্যাট',
+      'title_responder_alerts': 'সাড়া-দাতা সতর্কতা',
+      'title_map': 'জরুরি মানচিত্র',
+      'title_profile': 'প্রোফাইল',
+      'title_settings': 'সেটিংস',
+      'title_accessibility': 'অ্যাক্সেসিবিলিটি সেটিংস',
+      'filter_active': 'সক্রিয়',
+      'filter_cancelled': 'বাতিল',
+      'filter_all': 'সব',
+      'hint_search_case': 'কেস ID বা বার্তা দিয়ে খুঁজুন',
+      'hint_emergency_context': 'জরুরি পরিস্থিতি বর্ণনা করুন',
       'label_text_size': 'Text Size',
       'label_haptics': 'Haptics',
       'label_high_contrast': 'High Contrast Mode',
@@ -1163,42 +1404,42 @@ class AppSettingsProvider extends ChangeNotifier {
       'menu_unmute': 'Unmute',
     },
     'mr': {
-      'app_title': 'RescueLink',
-      'emergency_prompt': 'In an Emergency?',
-      'emergency_subtitle': 'Press the SOS button below to alert nearby responders',
-      'become_responder': 'Become A Responder',
-      'location_ready': 'Location: Ready',
-      'location_not_ready': 'Location: Not Ready',
-      'user_info': 'User Info',
-      'total_responders': 'Total Responders',
-      'nearby_5km': 'Nearby (5km)',
+      'app_title': 'रेस्क्यूलिंक',
+      'emergency_prompt': 'आपत्कालीन परिस्थितीत आहात का?',
+      'emergency_subtitle': 'जवळच्या प्रतिसादकांना सतर्क करण्यासाठी खालील SOS बटण दाबा',
+      'become_responder': 'प्रतिसादक बना',
+      'location_ready': 'स्थान: तयार',
+      'location_not_ready': 'स्थान: तयार नाही',
+      'user_info': 'वापरकर्ता माहिती',
+      'total_responders': 'एकूण प्रतिसादक',
+      'nearby_5km': 'जवळपास (5 किमी)',
       'sign_in_title': 'RescueLink साइन इन',
-      'sign_in': 'Sign In',
-      'create_account': 'Create Account',
+      'sign_in': 'साइन इन',
+      'create_account': 'खाते तयार करा',
       'continue_guest': 'अतिथी म्हणून सुरू ठेवा',
       'language': 'भाषा',
-      'button_cancel_sos': 'Cancel SOS',
-      'button_view_map': 'View Map',
-      'button_open_chat': 'Open Chat',
-      'button_call_emergency': 'Call 112',
-      'button_sign_out': 'Sign Out',
-      'button_people_needing_help': 'People Needing Help',
-      'button_voice_test': 'Voice Test',
-      'button_flash_test': 'Flash Test',
-      'button_responder_register': 'Register as Responder',
-      'button_accept': 'Accept',
-      'button_reject': 'Reject',
-      'title_my_sos_chats': 'My SOS Chats',
-      'title_responder_alerts': 'Responder Alerts',
-      'title_map': 'Emergency Map',
-      'title_profile': 'Profile',
-      'title_settings': 'Settings',
-      'title_accessibility': 'Accessibility Settings',
-      'filter_active': 'Active',
-      'filter_cancelled': 'Cancelled',
-      'filter_all': 'All',
-      'hint_search_case': 'Search by case ID or message',
-      'hint_emergency_context': 'Describe emergency situation',
+      'button_cancel_sos': 'SOS रद्द करा',
+      'button_view_map': 'नकाशा पहा',
+      'button_open_chat': 'चॅट उघडा',
+      'button_call_emergency': '112 ला कॉल करा',
+      'button_sign_out': 'साइन आउट',
+      'button_people_needing_help': 'मदतीची गरज असलेले लोक',
+      'button_voice_test': 'आवाज चाचणी',
+      'button_flash_test': 'फ्लॅश चाचणी',
+      'button_responder_register': 'प्रतिसादक म्हणून नोंदणी करा',
+      'button_accept': 'स्वीकारा',
+      'button_reject': 'नकारा',
+      'title_my_sos_chats': 'माझे SOS चॅट्स',
+      'title_responder_alerts': 'प्रतिसादक सूचना',
+      'title_map': 'आपत्कालीन नकाशा',
+      'title_profile': 'प्रोफाइल',
+      'title_settings': 'सेटिंग्ज',
+      'title_accessibility': 'प्रवेशयोग्यता सेटिंग्ज',
+      'filter_active': 'सक्रिय',
+      'filter_cancelled': 'रद्द',
+      'filter_all': 'सर्व',
+      'hint_search_case': 'केस ID किंवा संदेशाद्वारे शोधा',
+      'hint_emergency_context': 'आपत्कालीन परिस्थितीचे वर्णन करा',
       'label_text_size': 'Text Size',
       'label_haptics': 'Haptics',
       'label_high_contrast': 'High Contrast Mode',
@@ -1709,30 +1950,76 @@ class AppSettingsProvider extends ChangeNotifier {
   };
 
   String t(String key) {
-    return _strings[_languageCode]?[key] ?? _strings['en']?[key] ?? key;
+    final current = _languageCode.trim().toLowerCase();
+    final fallbackOrder = _fallbackOrderForLanguage(current);
+
+    for (final code in fallbackOrder) {
+      final value = _strings[code]?[key];
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+
+    return key;
+  }
+
+  List<String> _fallbackOrderForLanguage(String languageCode) {
+    final unique = <String>{};
+    final ordered = <String>[];
+
+    void push(String code) {
+      final normalized = code.trim().toLowerCase();
+      if (normalized.isEmpty || unique.contains(normalized)) {
+        return;
+      }
+      unique.add(normalized);
+      ordered.add(normalized);
+    }
+
+    // User-first fallback: selected language -> English -> Hindi -> Tamil.
+    push(languageCode);
+    push('en');
+    push('hi');
+    push('ta');
+    return ordered;
   }
 
   void configureForLocale(Locale locale) {
     final country = (locale.countryCode ?? '').toUpperCase();
     final language = locale.languageCode.toLowerCase();
 
-    final preset = _regionLanguagePresets['$country:$language'] ??
-        _regionLanguagePresets['$country:en'] ??
-        <String>[language, 'en'];
+    final previousLanguage = _languageCode;
+    if (_showAllLanguages) {
+      _availableLanguageCodes = List<String>.from(_indiaOfficialLanguageCodes);
+    } else {
+      final preset = _regionLanguagePresets['$country:$language'] ??
+          _regionLanguagePresets['$country:en'] ??
+          <String>[language, 'en'];
 
-    final options = <String>{...preset, language, 'en'};
-    if (options.length == 1 && options.contains('en')) {
-      options.addAll(<String>['hi', 'ta']);
+      final options = <String>{...preset, language, 'en'};
+      if (options.length == 1 && options.contains('en')) {
+        options.addAll(<String>['hi', 'ta']);
+      }
+      _availableLanguageCodes = options.toList();
     }
-    _availableLanguageCodes = options.toList();
 
-    if (_availableLanguageCodes.contains(language)) {
+    if (_availableLanguageCodes.contains(previousLanguage)) {
+      _languageCode = previousLanguage;
+    } else if (_availableLanguageCodes.contains(language)) {
       _languageCode = language;
-    } else if (!_availableLanguageCodes.contains(_languageCode)) {
+    } else {
       _languageCode = _availableLanguageCodes.first;
     }
 
     notifyListeners();
+  }
+
+  void setShowAllLanguages(bool value) {
+    if (_showAllLanguages == value) {
+      return;
+    }
+    _showAllLanguages = value;
+    configureForLocale(PlatformDispatcher.instance.locale);
   }
 
   void setLanguage(String languageCode) {
@@ -1891,6 +2178,34 @@ class AppSettingsProvider extends ChangeNotifier {
         return t('responder_type_shelter_host');
       default:
         return responderType;
+    }
+  }
+
+  String localizedDisplayName(String value) {
+    final normalized = value.trim().toLowerCase();
+    switch (normalized) {
+      case 'victim':
+        return t('name_victim');
+      case 'responder':
+        return t('name_responder');
+      case 'participant':
+        return t('name_participant');
+      case 'user':
+        return t('name_user');
+      case 'rescuelink user':
+      case 'rescue link user':
+      case 'unknown':
+        return t('name_user');
+      case 'ai':
+      case 'ai assistant':
+        return t('name_ai');
+      case 'rescuelink ai':
+      case 'rescue link ai':
+        return t('chat_rescue_link_ai');
+      case 'anonymous':
+        return t('name_anonymous');
+      default:
+        return value;
     }
   }
 }

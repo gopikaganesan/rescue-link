@@ -315,8 +315,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final senderName =
           ((data['senderName'] as String?)?.trim().isNotEmpty ?? false)
-          ? (data['senderName'] as String).trim()
-          : 'Participant';
+          ? context
+            .read<AppSettingsProvider>()
+            .localizedDisplayName((data['senderName'] as String).trim())
+          : context.read<AppSettingsProvider>().t('name_participant');
       final text = (data['text'] as String?)?.trim() ?? '';
       final preview = text.isEmpty
           ? 'Sent an attachment'
@@ -632,18 +634,18 @@ class _HomeScreenState extends State<HomeScreen> {
     final commsProvider = context.read<CommsProvider>();
     final crisisProvider = context.read<CrisisProvider>();
 
-    final aiStatus = crisisProvider.latestAnalysis?.aiStatus ?? 'Local heuristic response';
+    final aiStatus = crisisProvider.latestAnalysis?.aiStatus ?? 'local_heuristic_response';
     final aiStatusLabel = aiStatus == 'gemini_success'
-        ? 'Gemini API response received'
+      ? settings.t('home_ai_status_gemini_success')
         : aiStatus == 'missing_api_key'
-            ? 'Gemini key missing, local fallback used'
+        ? settings.t('home_ai_status_missing_api_key')
             : aiStatus == 'forced_offline'
-                ? 'Simulation mode forced local fallback'
+          ? settings.t('home_ai_status_forced_offline')
                 : aiStatus == 'gemini_empty_response'
-                    ? 'Gemini returned empty response, local fallback used'
+            ? settings.t('home_ai_status_empty_response')
                     : aiStatus == 'gemini_error'
-                        ? 'Gemini call failed, local fallback used'
-                        : 'Local heuristic response';
+              ? settings.t('home_ai_status_gemini_error')
+              : settings.t('home_ai_status_local_heuristic');
 
     showDialog<void>(
       context: context,
@@ -659,7 +661,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               const Icon(Icons.info_outline, color: Colors.blue),
               const SizedBox(width: 8),
-              const Expanded(child: Text('Emergency info')),
+              Expanded(child: Text(settings.t('home_emergency_info_title'))),
               IconButton(
                 icon: const Icon(Icons.close),
                 onPressed: () => Navigator.of(dialogContext).pop(),
@@ -677,7 +679,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: infoTextStyle,
               ),
               const SizedBox(height: 8),
-              Text('AI status: $aiStatusLabel', style: infoTextStyle),
+              Text(
+                settings.t('home_ai_status').replaceAll('{status}', aiStatusLabel),
+                style: infoTextStyle,
+              ),
               const SizedBox(height: 8),
               Text(
                 _cloudTranscriptionEnabled
@@ -698,7 +703,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(width: 8),
                   Text(
                     commsProvider.forceOfflineAi
-                        ? 'Local Fallback'
+                        ? settings.t('status_local_fallback')
                         : settings.t('button_powered_by_gemini'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           fontWeight: FontWeight.w600,
@@ -775,7 +780,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ResponderChatListScreen.open(
         context,
         currentUserId: user.id,
-        currentUserName: user.displayName,
+        currentUserName:
+          context.read<AppSettingsProvider>().localizedDisplayName(user.displayName),
       );
       return;
     }
@@ -783,7 +789,8 @@ class _HomeScreenState extends State<HomeScreen> {
     VictimChatListScreen.open(
       context,
       currentUserId: user.id,
-      currentUserName: user.displayName,
+        currentUserName:
+          context.read<AppSettingsProvider>().localizedDisplayName(user.displayName),
     );
   }
 
@@ -802,7 +809,9 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => GroupChatScreen(
           sosId: sosId,
           currentUserId: user.id,
-          currentUserName: user.displayName,
+            currentUserName: context
+              .read<AppSettingsProvider>()
+              .localizedDisplayName(user.displayName),
           currentUserRole: 'victim',
           enableResponderJoinGate: false,
         ),
@@ -826,24 +835,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showLanguagePicker() {
-    final settings = context.read<AppSettingsProvider>();
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        return Container(
-          padding: const EdgeInsets.only(top: 12, bottom: 20),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(
-              top: Radius.circular(24),
+        return Consumer<AppSettingsProvider>(
+          builder: (context, settings, _) => Container(
+            padding: const EdgeInsets.only(top: 12, bottom: 20),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
             ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
               // Drag handle
               Container(
                 width: 40,
@@ -871,7 +879,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: TextStyle(color: Colors.grey),
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: SwitchListTile.adaptive(
+                  value: settings.showAllLanguages,
+                  onChanged: settings.setShowAllLanguages,
+                  title: Text(settings.t('home_show_all_languages')),
+                  subtitle: Text(settings.t('home_show_all_languages_hint')),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                ),
+              ),
+
+              const SizedBox(height: 8),
 
               Flexible(
                 child: ListView.builder(
@@ -939,7 +960,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                 ),
               ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -979,13 +1001,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              Row(
-                children: [
+              Builder(
+                builder: (context) {
+                  final localizedName = context
+                      .read<AppSettingsProvider>()
+                      .localizedDisplayName(user.displayName);
+                  return Row(
+                    children: [
                   CircleAvatar(
                     radius: 28,
                     child: Text(
-                      user.displayName.isNotEmpty
-                          ? user.displayName[0].toUpperCase()
+                      localizedName.isNotEmpty
+                          ? localizedName[0].toUpperCase()
                           : 'U',
                       style: const TextStyle(fontSize: 20),
                     ),
@@ -996,13 +1023,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          user.displayName,
+                          localizedName,
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
                         const SizedBox(height: 2),
                         Text(
                           user.email.isEmpty
-                              ? (user.phoneNumber ?? 'No email')
+                              ? (user.phoneNumber ??
+                                  context
+                                      .read<AppSettingsProvider>()
+                                      .t('auth_no_email'))
                               : user.email,
                           style: TextStyle(color: Colors.grey.shade600),
                         ),
@@ -1010,6 +1040,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ],
+                  );
+                },
               ),
               const SizedBox(height: 16),
 
@@ -1956,7 +1988,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
     final authProvider = context.watch<AuthProvider>();
-    final commsProvider = context.watch<CommsProvider>();
     final crisisProvider = context.watch<CrisisProvider>();
 
     // Build icon list dynamically
@@ -1970,7 +2001,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Map actions
     final List<VoidCallback> actions = [
-      _showLanguagePicker,
+      _showCommsSimulationSheet,
       _openChats,
       if (authProvider.currentUser?.isResponder == true) _openResponderRequests,
       _openMap,
@@ -1991,8 +2022,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.language),
-            onPressed: _showCommsSimulationSheet,
-            tooltip: context.read<AppSettingsProvider>().t('comms_simulation_title'),
+            onPressed: _showLanguagePicker,
+            tooltip: context.read<AppSettingsProvider>().t('home_select_language'),
           ),
         ],
       ),
