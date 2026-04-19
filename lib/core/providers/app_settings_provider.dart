@@ -33,8 +33,45 @@ class AppSettingsProvider extends ChangeNotifier {
     'ur',
   ];
 
+  static const List<String> _worldLanguageCodes = <String>[
+    'en',
+    'hi',
+    'ta',
+    'te',
+    'bn',
+    'mr',
+    'gu',
+    'kn',
+    'ml',
+    'pa',
+    'ur',
+    'as',
+    'or',
+    'ne',
+    'es',
+    'fr',
+    'de',
+    'it',
+    'pt',
+    'ru',
+    'ar',
+    'zh',
+    'ja',
+    'ko',
+    'id',
+    'ms',
+    'th',
+    'vi',
+    'tr',
+    'nl',
+    'pl',
+    'sv',
+    'uk',
+    'fa',
+  ];
+
   String _languageCode = 'en';
-  List<String> _availableLanguageCodes = List<String>.from(_indiaOfficialLanguageCodes);
+  List<String> _availableLanguageCodes = List<String>.from(_worldLanguageCodes);
   bool _showAllLanguages = false;
   double _textScaleFactor = 1.0;
   bool _hapticsEnabled = true;
@@ -42,25 +79,29 @@ class AppSettingsProvider extends ChangeNotifier {
   bool _highContrastEnabled = false;
   bool _notificationsEnabled = true;
 
+  // For now, only en, hi, ta are recommended for all regions except India, due to translation coverage.
   static const Map<String, List<String>> _regionLanguagePresets = <String, List<String>>{
+    // India gets full official language set.
     'IN:en': _indiaOfficialLanguageCodes,
     'IN:hi': <String>['hi', 'en', 'ta', 'te', 'kn'],
     'IN:ta': <String>['ta', 'en', 'hi', 'ml', 'te'],
     'IN:te': <String>['te', 'en', 'hi', 'ta', 'kn'],
-    'IN:kn': <String>['kn', 'en', 'hi', 'ta', 'ml'],
-    'IN:ml': <String>['ml', 'en', 'hi', 'kn'],
-    'IN:mr': <String>['mr', 'en', 'hi', 'gu'],
-    'IN:bn': <String>['bn', 'en', 'hi', 'or'],
-    'IN:gu': <String>['gu', 'en', 'hi', 'mr'],
-    'IN:pa': <String>['pa', 'en', 'hi', 'or'],
-    'IN:or': <String>['or', 'en', 'hi', 'bn'],
-    'CN:zh': <String>['zh', 'en'],
-    'JP:ja': <String>['ja', 'en'],
-    'KR:ko': <String>['ko', 'en'],
+    'IN:bn': <String>['bn', 'en', 'hi'],
+    'IN:mr': <String>['mr', 'en', 'hi'],
+    'IN:gu': <String>['gu', 'en', 'hi'],
+    'IN:kn': <String>['kn', 'en', 'hi', 'ta', 'te'],
+    'IN:ml': <String>['ml', 'en', 'ta', 'hi'],
+    'IN:pa': <String>['pa', 'en', 'hi'],
+    'IN:ur': <String>['ur', 'en', 'hi'],
+    'IN:as': <String>['as', 'en', 'hi'],
+    'IN:or': <String>['or', 'en', 'hi'],
+    'IN:ne': <String>['ne', 'en', 'hi'],
+    // All other regions: only recommend en, hi, ta for now.
+    // This can be expanded when more translations are available.
+    'default': <String>['en', 'hi', 'ta'],
   };
 
   static const Map<String, String> _languageLabels = {
-    'en': 'English',
     'hi': 'Hindi',
     'as': 'Assamese',
     'bn': 'Bengali',
@@ -86,6 +127,23 @@ class AppSettingsProvider extends ChangeNotifier {
     'zh': 'Chinese',
     'ja': 'Japanese',
     'ko': 'Korean',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'ru': 'Russian',
+    'ar': 'Arabic',
+    'id': 'Indonesian',
+    'ms': 'Malay',
+    'th': 'Thai',
+    'vi': 'Vietnamese',
+    'tr': 'Turkish',
+    'nl': 'Dutch',
+    'pl': 'Polish',
+    'sv': 'Swedish',
+    'uk': 'Ukrainian',
+    'fa': 'Persian',
   };
 
   static const Map<String, String> _nativeLanguageLabels = {
@@ -115,6 +173,23 @@ class AppSettingsProvider extends ChangeNotifier {
     'zh': '中文',
     'ja': '日本語',
     'ko': '한국어',
+    'es': 'Español',
+    'fr': 'Français',
+    'de': 'Deutsch',
+    'it': 'Italiano',
+    'pt': 'Português',
+    'ru': 'Русский',
+    'ar': 'العربية',
+    'id': 'Bahasa Indonesia',
+    'ms': 'Bahasa Melayu',
+    'th': 'ไทย',
+    'vi': 'Tiếng Việt',
+    'tr': 'Türkçe',
+    'nl': 'Nederlands',
+    'pl': 'Polski',
+    'sv': 'Svenska',
+    'uk': 'Українська',
+    'fa': 'فارسی',
   };
 
   String get languageCode => _languageCode;
@@ -472,9 +547,9 @@ class AppSettingsProvider extends ChangeNotifier {
       'status_local_fallback': 'Local Fallback',
       'chat_emergency_overview': 'Emergency Overview',
       'home_select_language': 'Select Language',
-      'home_choose_preferred_language': 'Choose your preferred language',
-      'home_show_all_languages': 'Show all official Indian languages',
-      'home_show_all_languages_hint': 'Turn on to display the full language list',
+      'home_choose_preferred_language': 'Recommended for your region',
+      'home_show_all_languages': 'Show all world languages',
+      'home_show_all_languages_hint': 'Turn on to browse the full global language list',
       'account_anonymous_session': 'Anonymous Session',
       'account_registered_account': 'Registered Account',
       'account_signin_create': 'Sign In / Create Account',
@@ -813,9 +888,9 @@ class AppSettingsProvider extends ChangeNotifier {
       'status_local_fallback': 'स्थानीय फॉलबैक',
       'chat_emergency_overview': 'आपातकालीन अवलोकन',
       'home_select_language': 'भाषा चुनें',
-      'home_choose_preferred_language': 'अपनी पसंदीदा भाषा चुनें',
-      'home_show_all_languages': 'भारत की सभी आधिकारिक भाषाएँ दिखाएँ',
-      'home_show_all_languages_hint': 'पूर्ण भाषा सूची दिखाने के लिए इसे चालू करें',
+      'home_choose_preferred_language': 'आपके क्षेत्र के लिए अनुशंसित',
+      'home_show_all_languages': 'सभी विश्व भाषाएँ दिखाएँ',
+      'home_show_all_languages_hint': 'पूर्ण वैश्विक भाषा सूची देखने के लिए इसे चालू करें',
       'account_anonymous_session': 'गुमनाम सत्र',
       'account_registered_account': 'पंजीकृत खाता',
       'account_signin_create': 'साइन इन / खाता बनाएं',
@@ -1154,9 +1229,9 @@ class AppSettingsProvider extends ChangeNotifier {
       'status_local_fallback': 'உள்ளூர் ஃபார்பேக்',
       'chat_emergency_overview': 'அவசர நிலை சுருக்கம்',
       'home_select_language': 'மொழியை தேர்வு செய்க',
-      'home_choose_preferred_language': 'உங்கள் விருப்ப மொழியை தேர்வு செய்க',
-      'home_show_all_languages': 'இந்தியாவின் அனைத்து அதிகாரப்பூர்வ மொழிகளையும் காட்டு',
-      'home_show_all_languages_hint': 'முழு மொழி பட்டியலைக் காட்ட இதை இயக்கு',
+      'home_choose_preferred_language': 'உங்கள் பிராந்தியத்திற்கு பரிந்துரைக்கப்பட்டது',
+      'home_show_all_languages': 'அனைத்து உலக மொழிகளையும் காட்டு',
+      'home_show_all_languages_hint': 'முழு உலக மொழி பட்டியலை காண இதை இயக்கு',
       'account_anonymous_session': 'அடையாளமற்ற அமர்வு',
       'account_registered_account': 'பதிவு செய்யப்பட்ட கணக்கு',
       'account_signin_create': 'உள்நுழை / கணக்கு உருவாக்கு',
@@ -1990,17 +2065,31 @@ class AppSettingsProvider extends ChangeNotifier {
 
     final previousLanguage = _languageCode;
     if (_showAllLanguages) {
-      _availableLanguageCodes = List<String>.from(_indiaOfficialLanguageCodes);
+      _availableLanguageCodes = List<String>.from(_worldLanguageCodes);
     } else {
       final preset = _regionLanguagePresets['$country:$language'] ??
           _regionLanguagePresets['$country:en'] ??
-          <String>[language, 'en'];
+          _regionLanguagePresets['default']!;
 
-      final options = <String>{...preset, language, 'en'};
-      if (options.length == 1 && options.contains('en')) {
-        options.addAll(<String>['hi', 'ta']);
+      final options = <String>[];
+      final seen = <String>{};
+
+      void addOption(String code) {
+        final normalized = code.trim().toLowerCase();
+        if (normalized.isEmpty || seen.contains(normalized)) {
+          return;
+        }
+        seen.add(normalized);
+        options.add(normalized);
       }
-      _availableLanguageCodes = options.toList();
+
+      for (final code in preset) {
+        addOption(code);
+      }
+      addOption(language);
+      addOption('en');
+
+      _availableLanguageCodes = options;
     }
 
     if (_availableLanguageCodes.contains(previousLanguage)) {
