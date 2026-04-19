@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../core/models/responder_model.dart';
+import '../core/providers/app_settings_provider.dart';
 import '../core/utils/chat_message_utils.dart';
 
 class ResponderProfileScreen extends StatefulWidget {
@@ -29,11 +31,12 @@ class ResponderProfileScreen extends StatefulWidget {
 
 class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
   Future<void> _callResponder(BuildContext context) async {
+    final settings = context.read<AppSettingsProvider>();
     final messenger = ScaffoldMessenger.of(context);
     final phone = widget.responder.phoneNumber.trim();
     if (phone.isEmpty) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('No phone number available for this responder.')),
+        SnackBar(content: Text(settings.t('profile_no_phone_number'))),
       );
       return;
     }
@@ -45,16 +48,17 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
     }
 
     messenger.showSnackBar(
-      const SnackBar(content: Text('Could not open the dialer on this device.')),
+      SnackBar(content: Text(settings.t('profile_could_not_open_dialer'))),
     );
   }
 
   Future<void> _messageResponder(BuildContext context) async {
+    final settings = context.read<AppSettingsProvider>();
     final messenger = ScaffoldMessenger.of(context);
     final phone = widget.responder.phoneNumber.trim();
     if (phone.isEmpty) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('No messaging number available for this responder.')),
+        SnackBar(content: Text(settings.t('profile_no_messaging_number'))),
       );
       return;
     }
@@ -69,7 +73,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
     }
 
     messenger.showSnackBar(
-      const SnackBar(content: Text('Messaging is not supported on this device yet.')),
+      SnackBar(content: Text(settings.t('profile_messaging_not_supported'))),
     );
   }
 
@@ -80,6 +84,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
     }
 
     final messenger = ScaffoldMessenger.of(context);
+    final settings = context.read<AppSettingsProvider>();
     final reviewDocId = '${currentUserId}_${widget.responder.id}';
     final directReviewRef = FirebaseFirestore.instance
         .collection('responder_reviews')
@@ -119,13 +124,13 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: Text('Review ${widget.responder.name}'),
+          title: Text(settings.t('profile_review_title').replaceAll('{name}', widget.responder.name)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Give both a rating and a review.'),
+                Text(settings.t('profile_give_rating_review')),
                 const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -154,8 +159,8 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                   maxLines: 4,
                   maxLength: 400,
                   enabled: !isSubmitting,
-                  decoration: const InputDecoration(
-                    hintText: 'Share your experience with this responder...',
+                  decoration: InputDecoration(
+                    hintText: settings.t('profile_share_experience'),
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -186,7 +191,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                           if (mounted) {
                             messenger.showSnackBar(
                               SnackBar(
-                                content: Text('Unable to delete review: $e'),
+                                content: Text('${settings.t('profile_unable_delete_review')}$e'),
                               ),
                             );
                           }
@@ -198,15 +203,15 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                         Navigator.pop(ctx);
                         if (mounted) {
                           messenger.showSnackBar(
-                            const SnackBar(content: Text('Review deleted.')),
+                            SnackBar(content: Text(settings.t('profile_review_deleted'))),
                           );
                         }
                       },
-                child: const Text('Delete'),
+                child: Text(settings.t('menu_delete_chat')),
               ),
             TextButton(
               onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: Text(settings.t('profile_cancel')),
             ),
             FilledButton(
               onPressed: isSubmitting ||
@@ -241,7 +246,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                         if (mounted) {
                           messenger.showSnackBar(
                             SnackBar(
-                              content: Text('Unable to save review: $e'),
+                              content: Text('${settings.t('profile_unable_save_review')}$e'),
                             ),
                           );
                         }
@@ -253,11 +258,11 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                       Navigator.pop(ctx);
                       if (mounted) {
                         messenger.showSnackBar(
-                          const SnackBar(content: Text('Review saved.')),
+                          SnackBar(content: Text(settings.t('profile_review_saved'))),
                         );
                       }
                     },
-              child: const Text('Save Review'),
+              child: Text(settings.t('profile_save_review')),
             ),
           ],
         ),
@@ -296,15 +301,18 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<AppSettingsProvider>();
     final isAi = widget.responder.id == 'rescuelink_ai';
     final verificationText = widget.responder.verifiedResponder
-        ? 'Verified responder'
-        : 'Not verified yet';
+      ? settings.t('profile_verified_responder')
+      : settings.t('profile_not_verified_yet');
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isCurrentUserProfile ? 'My Responder Profile' : (isAi ? 'AI Assistant Profile' : 'Responder Profile'),
+          widget.isCurrentUserProfile
+              ? settings.t('profile_my_responder_profile')
+              : (isAi ? settings.t('profile_ai_assistant') : settings.t('profile_responder_profile')),
         ),
       ),
       body: StreamBuilder<QuerySnapshot>(
@@ -380,7 +388,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  widget.responder.responderType,
+                                  settings.localizedResponderType(widget.responder.responderType),
                                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                                         color: Colors.white.withValues(alpha: 0.95),
                                       ),
@@ -396,7 +404,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                         runSpacing: 8,
                         children: [
                           Chip(
-                            label: Text(widget.responder.skillsArea),
+                            label: Text(settings.localizedSkill(widget.responder.skillsArea)),
                             backgroundColor: Colors.white,
                           ),
                           Chip(
@@ -408,7 +416,9 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                           if (!isAi)
                             Chip(
                               label: Text(
-                                widget.responder.isAvailable ? 'Available now' : 'Currently offline',
+                                widget.responder.isAvailable
+                                    ? settings.t('profile_available_now')
+                                    : settings.t('profile_currently_offline'),
                               ),
                               backgroundColor: Colors.white,
                             ),
@@ -422,14 +432,14 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                   children: [
                     _statCard(
                       context,
-                      'Rescues',
+                      settings.t('profile_rescues'),
                       widget.responder.rescueCount.toString(),
                       Icons.emoji_people,
                     ),
                     const SizedBox(width: 12),
                     _statCard(
                       context,
-                      'Rating',
+                      settings.t('profile_rating'),
                       avgRating == 0
                           ? 'N/A'
                           : avgRating.toStringAsFixed(1),
@@ -442,15 +452,19 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                   children: [
                     _statCard(
                       context,
-                      'Reviews',
+                      settings.t('profile_reviews'),
                       reviewData.length.toString(),
                       Icons.reviews,
                     ),
                     const SizedBox(width: 12),
                     _statCard(
                       context,
-                      'Identity',
-                      isAi ? 'AI Core' : (widget.responder.verifiedResponder ? 'Verified' : 'Unverified'),
+                      settings.t('profile_identity'),
+                      isAi
+                          ? settings.t('profile_ai_core')
+                          : (widget.responder.verifiedResponder
+                              ? settings.t('profile_verified')
+                              : settings.t('profile_unverified')),
                       Icons.verified_user,
                     ),
                   ],
@@ -458,7 +472,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                 const SizedBox(height: 18),
                 if (!isAi) ...[
                   Text(
-                    'Contact',
+                    settings.t('profile_contact'),
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -486,7 +500,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                           child: ElevatedButton.icon(
                             onPressed: () => _callResponder(context),
                             icon: const Icon(Icons.call),
-                            label: const Text('Call'),
+                            label: Text(settings.t('profile_call')),
                           ),
                         ),
                         SizedBox(
@@ -494,7 +508,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                           child: OutlinedButton.icon(
                             onPressed: () => _messageResponder(context),
                             icon: const Icon(Icons.message),
-                            label: const Text('Message'),
+                            label: Text(settings.t('profile_message')),
                           ),
                         ),
                       ],
@@ -505,7 +519,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'Community Reviews',
+                      settings.t('profile_community_reviews'),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
@@ -514,7 +528,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                       TextButton.icon(
                         onPressed: _showReviewAndRatingDialog,
                         icon: const Icon(Icons.add_reaction_outlined),
-                        label: const Text('Rate & Review'),
+                        label: Text(settings.t('profile_rate_review')),
                       ),
                   ],
                 ),
@@ -527,7 +541,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                       color: Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: const Text('No reviews yet. Be the first to share your experience!'),
+                    child: Text(settings.t('profile_no_reviews_yet')),
                   )
                 else
                   ListView.separated(
@@ -590,7 +604,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                                 alignment: Alignment.centerRight,
                                 child: TextButton(
                                   onPressed: _showReviewAndRatingDialog,
-                                  child: const Text('Edit/Delete'),
+                                  child: Text(settings.t('profile_edit_delete')),
                                 ),
                               ),
                             ],

@@ -126,8 +126,8 @@ class _AuthScreenState extends State<AuthScreen> {
                   children: [
                     Text(
                       _isRegisterMode
-                          ? 'Create account'
-                          : 'Sign in to RescueLink',
+                          ? settings.t('auth_create_account_prompt')
+                          : settings.t('auth_sign_in_title'),
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                     const SizedBox(height: 16),
@@ -138,14 +138,14 @@ class _AuthScreenState extends State<AuthScreen> {
                           children: [
                             TextFormField(
                               controller: _displayNameController,
-                              decoration: const InputDecoration(
-                                labelText: 'Display Name',
+                              decoration: InputDecoration(
+                                labelText: settings.t('auth_display_name'),
                                 border: OutlineInputBorder(),
                               ),
                               validator: (value) {
                                 if (_isRegisterMode &&
                                     (value == null || value.trim().isEmpty)) {
-                                  return 'Enter your display name';
+                                  return settings.t('auth_enter_display_name');
                                 }
                                 return null;
                               },
@@ -154,8 +154,8 @@ class _AuthScreenState extends State<AuthScreen> {
                             TextFormField(
                               controller: _phoneController,
                               keyboardType: TextInputType.phone,
-                              decoration: const InputDecoration(
-                                labelText: 'Phone Number (optional, used for responder auto-fill)',
+                              decoration: InputDecoration(
+                                labelText: settings.t('auth_phone_number'),
                                 border: OutlineInputBorder(),
                               ),
                             ),
@@ -164,17 +164,17 @@ class _AuthScreenState extends State<AuthScreen> {
                       ),
                     TextFormField(
                       controller: _emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
+                      decoration: InputDecoration(
+                        labelText: settings.t('auth_email'),
                         border: OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
-                          return 'Enter your email';
+                          return settings.t('auth_enter_email');
                         }
                         if (!value.contains('@')) {
-                          return 'Enter a valid email';
+                          return settings.t('auth_enter_valid_email');
                         }
                         return null;
                       },
@@ -182,14 +182,14 @@ class _AuthScreenState extends State<AuthScreen> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _passwordController,
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
+                      decoration: InputDecoration(
+                        labelText: settings.t('auth_password'),
                         border: OutlineInputBorder(),
                       ),
                       obscureText: true,
                       validator: (value) {
                         if (value == null || value.length < 6) {
-                          return 'Password must be at least 6 characters';
+                          return settings.t('auth_password_min_length');
                         }
                         return null;
                       },
@@ -221,13 +221,13 @@ class _AuthScreenState extends State<AuthScreen> {
                             },
                       child: Text(
                         _isRegisterMode
-                            ? 'Already have an account? Sign in'
-                            : 'Need an account? Create one',
+                            ? settings.t('auth_already_have_account')
+                            : settings.t('auth_need_account'),
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Phone OTP login is currently disabled in this build to avoid billing dependency. Register with email and optional phone number.',
+                      settings.t('auth_phone_otp_disabled'),
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall

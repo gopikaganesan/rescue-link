@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RescueLink</string>
+    <string name="sos_button_description">SOS Button</string>
+    <string name="shortcut_short_label_sos">SOS</string>
+    <string name="shortcut_long_label_trigger_emergency_sos">Trigger Emergency SOS</string>
+</resources>

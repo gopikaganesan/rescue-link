@@ -10,20 +10,24 @@ import 'package:http/http.dart' as http;
 class ChatService {
   ChatService({FirebaseFirestore? firestore})
       : _firestore = firestore ?? FirebaseFirestore.instance,
-        _geminiApiKey = _resolveGeminiApiKey();
+        _geminiApiKey = _resolveGeminiApiKey(),
+        _geminiModelCandidates = _resolveGeminiModelCandidates();
 
   static const int _maxMessageLength = 1000;
   static const int _maxAiMessageLength = 12000;
   static const int _maxDisplayNameLength = 80;
   static const String _aiUid = 'rescuelink_ai';
   static const String _aiDisplayName = 'RescueLink AI';
-  static const List<String> _geminiModelCandidates = <String>[
+  static const List<String> _defaultGeminiModelCandidates = <String>[
     'gemini-2.5-flash',
     'gemini-2.5-flash-lite',
+    'gemini-2.5-pro',
     'gemini-2.0-flash',
     'gemini-2.0-flash-001',
     'gemini-2.0-flash-lite-001',
     'gemini-2.0-flash-lite',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-pro-latest',
     'gemini-flash-latest',
   ];
   static const Duration _geminiTimeout = Duration(seconds: 12);
@@ -95,6 +99,7 @@ class ChatService {
 
   final FirebaseFirestore _firestore;
   final String _geminiApiKey;
+  final List<String> _geminiModelCandidates;
   String? _lastAiFailure;
   static const List<Duration> _retryBackoff = <Duration>[
     Duration(milliseconds: 300),
@@ -2693,6 +2698,41 @@ $linksText
     }
 
     return '';
+  }
+
+  static List<String> _resolveGeminiModelCandidates() {
+    final raw = const String.fromEnvironment(
+      'GEMINI_MODEL_CANDIDATES',
+      defaultValue: '',
+    ).trim();
+    final aliasRaw = const String.fromEnvironment(
+      'GEMINI_MODELS',
+      defaultValue: '',
+    ).trim();
+
+    final source = raw.isNotEmpty ? raw : aliasRaw;
+    if (source.isEmpty) {
+      return _defaultGeminiModelCandidates;
+    }
+
+    final parsed = source
+        .split(',')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+    if (parsed.isEmpty) {
+      return _defaultGeminiModelCandidates;
+    }
+
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final item in parsed) {
+      if (seen.add(item)) {
+        unique.add(item);
+      }
+    }
+
+    return unique;
   }
 
   static String _normalizeApiKey(String raw) {

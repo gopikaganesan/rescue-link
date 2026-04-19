@@ -5,11 +5,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/models/emergency_request_model.dart';
 import '../core/models/responder_model.dart';
+import '../core/providers/app_settings_provider.dart';
 import '../core/providers/auth_provider.dart';
 import '../core/providers/emergency_request_provider.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/services/responder_matching_service.dart';
+import '../widgets/translated_text.dart';
 import 'group_chat_screen.dart';
 import 'map_screen.dart';
 
@@ -178,9 +180,10 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<AppSettingsProvider>();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('People Needing Help'),
+        title: Text(settings.t('button_people_needing_help')),
         actions: [
           IconButton(
             onPressed: _refresh,
@@ -286,7 +289,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 children: [
                                   const Icon(Icons.category_outlined, size: 16),
                                   const SizedBox(width: 4),
-                                  Text(request.category),
+                                  Text(settings.localizedCrisisCategory(request.category)),
                                 ],
                               ),
                               Row(
@@ -302,7 +305,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 children: [
                                   const Icon(Icons.support_agent, size: 16),
                                   const SizedBox(width: 4),
-                                  Text(request.recommendedSkill),
+                                  Text(settings.localizedSkill(request.recommendedSkill)),
                                 ],
                               ),
                               if (request.attachmentUrl?.isNotEmpty ?? false)
@@ -317,7 +320,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                             Padding(
                               padding: const EdgeInsets.only(top: 6),
                               child: Text(
-                                'Manual override: CRITICAL',
+                                settings.t('manual_override_critical'),
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                       color: Colors.red.shade800,
                                       fontWeight: FontWeight.w700,
@@ -339,7 +342,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                   const Icon(Icons.psychology_alt_outlined, size: 16),
                                   const SizedBox(width: 6),
                                   Text(
-                                    'Human review recommended',
+                                    settings.t('human_review_recommended'),
                                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                           color: Colors.orange.shade900,
                                           fontWeight: FontWeight.w600,
@@ -349,17 +352,17 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                               ),
                             ),
                           const SizedBox(height: 6),
-                          Text(request.summary),
+                          TranslatedText(request.summary),
                           ExpansionTile(
                             tilePadding: EdgeInsets.zero,
                             childrenPadding: const EdgeInsets.only(bottom: 8),
-                            title: const Text('View details & media'),
+                            title: Text(settings.t('view_details_and_media')),
                             children: [
                               if (request.originalMessage.trim().isNotEmpty) ...[
                                 Align(
                                   alignment: Alignment.centerLeft,
                                   child: Text(
-                                    'Reporter message:',
+                                    settings.t('reporter_message'),
                                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -368,7 +371,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 const SizedBox(height: 4),
                                 Align(
                                   alignment: Alignment.centerLeft,
-                                  child: Text(request.originalMessage),
+                                  child: TranslatedText(request.originalMessage),
                                 ),
                                 const SizedBox(height: 8),
                               ],
@@ -376,7 +379,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 Align(
                                   alignment: Alignment.centerLeft,
                                   child: Text(
-                                    'Voice transcript:',
+                                    settings.t('voice_transcript'),
                                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -385,7 +388,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 const SizedBox(height: 4),
                                 Align(
                                   alignment: Alignment.centerLeft,
-                                  child: Text(request.voiceTranscript!),
+                                  child: TranslatedText(request.voiceTranscript!),
                                 ),
                                 const SizedBox(height: 8),
                               ],
@@ -399,7 +402,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                       OutlinedButton.icon(
                                         onPressed: () => _openAttachment(request.attachmentUrl!),
                                         icon: const Icon(Icons.image_outlined),
-                                        label: const Text('Open image'),
+                                        label: Text(settings.t('open_image')),
                                       ),
                                     ],
                                   ),
@@ -419,7 +422,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                           const SizedBox(width: 6),
                                           Expanded(
                                             child: Text(
-                                              'Image unavailable in preview. Use Open image.',
+                                              settings.t('image_unavailable_preview'),
                                               style: Theme.of(context).textTheme.bodySmall,
                                             ),
                                           ),
@@ -446,14 +449,14 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                         ),
                                         label: Text(
                                           (_activeVoiceUrl == request.voiceAudioUrl && _isVoicePlaying)
-                                              ? 'Stop audio'
-                                              : 'Play audio',
+                                              ? settings.t('stop_audio')
+                                              : settings.t('play_audio'),
                                         ),
                                       ),
                                       TextButton.icon(
                                         onPressed: () => _openAttachment(request.voiceAudioUrl!),
                                         icon: const Icon(Icons.open_in_new),
-                                        label: const Text('Open external'),
+                                        label: Text(settings.t('open_external')),
                                       ),
                                     ],
                                   ),
@@ -464,7 +467,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 Align(
                                   alignment: Alignment.centerLeft,
                                   child: Text(
-                                    'Suggested actions:',
+                                    settings.t('recommended_actions'),
                                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -474,7 +477,13 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 ...request.suggestedActions.take(4).map(
                                       (action) => Padding(
                                         padding: const EdgeInsets.only(top: 2),
-                                        child: Text('• $action'),
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: <Widget>[
+                                            const Text('• '),
+                                            Expanded(child: TranslatedText(action)),
+                                          ],
+                                        ),
                                       ),
                                     ),
                               ],
@@ -487,7 +496,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 child: OutlinedButton.icon(
                                   onPressed: () => _navigateInApp(request),
                                   icon: const Icon(Icons.navigation),
-                                  label: const Text('Navigate'),
+                                  label: Text(settings.t('navigate')),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -495,7 +504,7 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
                                 child: ElevatedButton.icon(
                                   onPressed: () => _accept(request),
                                   icon: const Icon(Icons.check),
-                                  label: const Text('Accept'),
+                                  label: Text(settings.t('button_accept')),
                                 ),
                               ),
                             ],
