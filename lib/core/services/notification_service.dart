@@ -11,7 +11,17 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static Future<void> Function(String sosId)? _onChatNotificationTap;
+    static Future<void> Function(String requestId, String actionId)?
+      _onSosNotificationTap;
   static String? _pendingChatSosId;
+    static Map<String, String>? _pendingSosNotification;
+
+    static const String _payloadTypeKey = 'notificationType';
+    static const String _payloadTypeChat = 'chat';
+    static const String _payloadTypeSos = 'sos';
+
+    static const String sosAcceptAction = 'sos_accept';
+    static const String sosNavigateAction = 'sos_navigate';
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'rescue_link_alerts',
@@ -27,7 +37,10 @@ class NotificationService {
     await _plugin.initialize(
       settings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
-        _handleLocalNotificationTap(response.payload);
+        _handleLocalNotificationTap(
+          payload: response.payload,
+          actionId: response.actionId,
+        );
       },
     );
 
@@ -51,20 +64,36 @@ class NotificationService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       final title = message.notification?.title ?? 'RescueLink Alert';
       final body = message.notification?.body ?? 'New emergency update';
-      await showSosAlert(
-        title: title,
-        body: body,
-        payload: _payloadFromRemoteMessage(message),
-      );
+      final chatSosId = _extractChatSosId(message.data);
+      if (chatSosId.isNotEmpty) {
+        await showChatMessageAlert(
+          title: title,
+          body: body,
+          chatSosId: chatSosId,
+        );
+        return;
+      }
+
+      final requestId = _extractRequestId(message.data);
+      if (requestId.isNotEmpty) {
+        await showResponderSosAlert(
+          requestId: requestId,
+          title: title,
+          body: body,
+        );
+        return;
+      }
+
+      await showSosAlert(title: title, body: body);
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      _dispatchChatNavigationForRemoteMessage(message);
+      _dispatchRemoteMessageNavigation(message);
     });
 
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
-      _dispatchChatNavigationForRemoteMessage(initialMessage);
+      _dispatchRemoteMessageNavigation(initialMessage);
     }
   }
 
@@ -75,23 +104,45 @@ class NotificationService {
     _flushPendingChatNavigation();
   }
 
-  static void _dispatchChatNavigationForRemoteMessage(RemoteMessage message) {
+  static void setOnSosNotificationTap(
+    Future<void> Function(String requestId, String actionId) handler,
+  ) {
+    _onSosNotificationTap = handler;
+    _flushPendingSosNavigation();
+  }
+
+  static void _dispatchRemoteMessageNavigation(RemoteMessage message) {
     final sosId = _extractChatSosId(message.data);
-    if (sosId.isEmpty) {
+    if (sosId.isNotEmpty) {
+      _queueOrHandleChatNavigation(sosId);
       return;
     }
-    _queueOrHandleChatNavigation(sosId);
-  }
 
-  static String? _payloadFromRemoteMessage(RemoteMessage message) {
-    final sosId = _extractChatSosId(message.data);
-    if (sosId.isEmpty) {
-      return null;
+    final requestId = _extractRequestId(message.data);
+    if (requestId.isEmpty) {
+      return;
     }
-    return jsonEncode(<String, String>{'chatSosId': sosId});
+    _queueOrHandleSosNavigation(requestId, sosNavigateAction);
   }
 
-  static void _handleLocalNotificationTap(String? payload) {
+  static String _chatPayload(String sosId) {
+    return jsonEncode(<String, String>{
+      _payloadTypeKey: _payloadTypeChat,
+      'chatSosId': sosId,
+    });
+  }
+
+  static String _sosPayload(String requestId) {
+    return jsonEncode(<String, String>{
+      _payloadTypeKey: _payloadTypeSos,
+      'requestId': requestId,
+    });
+  }
+
+  static void _handleLocalNotificationTap({
+    required String? payload,
+    required String? actionId,
+  }) {
     if (payload == null || payload.trim().isEmpty) {
       return;
     }
@@ -101,6 +152,20 @@ class NotificationService {
       if (decoded is! Map) {
         return;
       }
+
+      final payloadType = (decoded[_payloadTypeKey] as String?)?.trim();
+      if (payloadType == _payloadTypeSos) {
+        final requestId = _extractRequestId(decoded);
+        if (requestId.isEmpty) {
+          return;
+        }
+        final resolvedAction = (actionId?.trim().isNotEmpty ?? false)
+            ? actionId!.trim()
+            : sosNavigateAction;
+        _queueOrHandleSosNavigation(requestId, resolvedAction);
+        return;
+      }
+
       final sosId = _extractChatSosId(decoded);
       if (sosId.isEmpty) {
         return;
@@ -115,6 +180,14 @@ class NotificationService {
     final fromChat = (data['chatSosId'] as String?)?.trim();
     if (fromChat != null && fromChat.isNotEmpty) {
       return fromChat;
+    }
+    return '';
+  }
+
+  static String _extractRequestId(Map<dynamic, dynamic> data) {
+    final requestId = (data['requestId'] as String?)?.trim();
+    if (requestId != null && requestId.isNotEmpty) {
+      return requestId;
     }
     return '';
   }
@@ -136,6 +209,31 @@ class NotificationService {
     }
     _pendingChatSosId = null;
     handler(pending);
+  }
+
+  static void _queueOrHandleSosNavigation(String requestId, String actionId) {
+    final handler = _onSosNotificationTap;
+    if (handler == null) {
+      _pendingSosNotification = <String, String>{
+        'requestId': requestId,
+        'actionId': actionId,
+      };
+      return;
+    }
+    handler(requestId, actionId);
+  }
+
+  static void _flushPendingSosNavigation() {
+    final pending = _pendingSosNotification;
+    final handler = _onSosNotificationTap;
+    if (pending == null || handler == null) {
+      return;
+    }
+    _pendingSosNotification = null;
+    handler(
+      pending['requestId'] ?? '',
+      pending['actionId'] ?? sosNavigateAction,
+    );
   }
 
   static String _normalizeTopic(String value) {
@@ -245,6 +343,55 @@ class NotificationService {
       body,
       details,
       payload: payload,
+    );
+  }
+
+  static Future<void> showChatMessageAlert({
+    required String title,
+    required String body,
+    required String chatSosId,
+  }) async {
+    await showSosAlert(
+      title: title,
+      body: body,
+      payload: _chatPayload(chatSosId),
+    );
+  }
+
+  static Future<void> showResponderSosAlert({
+    required String requestId,
+    required String title,
+    required String body,
+    bool includeActions = true,
+  }) async {
+    final androidDetails = AndroidNotificationDetails(
+      'rescue_link_alerts',
+      'Rescue Alerts',
+      channelDescription: 'Emergency alerts and status updates',
+      importance: Importance.high,
+      priority: Priority.high,
+      actions: includeActions
+          ? <AndroidNotificationAction>[
+              const AndroidNotificationAction(
+                sosAcceptAction,
+                'Accept',
+                showsUserInterface: true,
+              ),
+              const AndroidNotificationAction(
+                sosNavigateAction,
+                'Navigate',
+                showsUserInterface: true,
+              ),
+            ]
+          : null,
+    );
+
+    await _plugin.show(
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      title,
+      body,
+      NotificationDetails(android: androidDetails),
+      payload: _sosPayload(requestId),
     );
   }
 }

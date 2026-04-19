@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
+import 'text_translation_service.dart';
+
 class CrisisAnalysis {
   final String category;
   final String severity;
@@ -32,14 +34,23 @@ class CrisisAnalysis {
 
 class GeminiService {
   static const String _fallbackSkill = 'General Support';
-  static const List<String> _modelCandidates = <String>[
+  static const List<String> _defaultModelCandidates = <String>[
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-pro',
     'gemini-2.0-flash',
     'gemini-2.0-flash-001',
+    'gemini-2.0-flash-lite-001',
     'gemini-2.0-flash-lite',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-pro-latest',
     'gemini-flash-latest',
   ];
   static const Duration _geminiTimeout = Duration(seconds: 12);
   final String _apiKey;
+  final List<String> _modelCandidates;
+  final TextTranslationService _textTranslationService =
+      TextTranslationService();
 
   static const Map<String, String> _emojiKeywords = <String, String>{
     '🚨': ' emergency alert ',
@@ -76,8 +87,62 @@ class GeminiService {
     '🧑‍⚕️': ' medical help ',
   };
 
-  GeminiService({String? apiKey})
-      : _apiKey = apiKey ?? const String.fromEnvironment('GEMINI_API_KEY');
+  static const Map<String, String> _textAliases = <String, String>{
+    'nerupu': ' fire ',
+    'neruppu': ' fire ',
+    'aag': ' fire ',
+    'aagni': ' fire ',
+    'agni': ' fire ',
+    'pani': ' water ',
+    'jal': ' water ',
+    'rakta': ' bleeding ',
+    'bachcha': ' child ',
+    'baccha': ' child ',
+    'ladki': ' woman ',
+    'ladkiyon': ' women ',
+    'mahila': ' woman ',
+    'missing person': ' missing person rescue ',
+    'trapped': ' trapped rescue ',
+  };
+
+  GeminiService({String? apiKey, List<String>? modelCandidates})
+      : _apiKey = apiKey ?? const String.fromEnvironment('GEMINI_API_KEY'),
+        _modelCandidates = modelCandidates ?? _resolveModelCandidates();
+
+  static List<String> _resolveModelCandidates() {
+    final raw = const String.fromEnvironment(
+      'GEMINI_MODEL_CANDIDATES',
+      defaultValue: '',
+    ).trim();
+    final aliasRaw = const String.fromEnvironment(
+      'GEMINI_MODELS',
+      defaultValue: '',
+    ).trim();
+
+    final source = raw.isNotEmpty ? raw : aliasRaw;
+    if (source.isEmpty) {
+      return _defaultModelCandidates;
+    }
+
+    final parsed = source
+        .split(',')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+    if (parsed.isEmpty) {
+      return _defaultModelCandidates;
+    }
+
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final item in parsed) {
+      if (seen.add(item)) {
+        unique.add(item);
+      }
+    }
+
+    return unique;
+  }
 
   Future<CrisisAnalysis> analyze(
     String userInput, {
@@ -86,7 +151,7 @@ class GeminiService {
     Uint8List? imageBytes,
     String? imageMimeType,
   }) async {
-    final normalizedInput = _normalizeInput(userInput);
+    final normalizedInput = await _normalizeInput(userInput);
 
     if (forceOffline) {
       _logAiStatus('forced_offline');
@@ -205,14 +270,37 @@ $normalizedInput
     );
   }
 
-  String _normalizeInput(String input) {
+  Future<String> _normalizeInput(String input) async {
     var normalized = input;
     for (final entry in _emojiKeywords.entries) {
       normalized = normalized.replaceAll(entry.key, entry.value);
     }
 
+    for (final entry in _textAliases.entries) {
+      normalized = normalized.replaceAll(
+        RegExp(r'\b' + RegExp.escape(entry.key) + r'\b', caseSensitive: false),
+        entry.value,
+      );
+    }
+
+    if (_containsNonEnglishScript(normalized)) {
+      final translated = await _textTranslationService.translate(
+        text: normalized,
+        targetLanguageCode: 'en',
+      );
+      if (translated.trim().isNotEmpty) {
+        normalized = translated;
+      }
+    }
+
     normalized = normalized.replaceAll(RegExp(r'\s+'), ' ').trim();
     return normalized.isEmpty ? input : normalized;
+  }
+
+  bool _containsNonEnglishScript(String input) {
+    return RegExp(
+      r'[\u0900-\u097F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F\u3040-\u30FF\uAC00-\uD7AF\u4E00-\u9FFF]',
+    ).hasMatch(input);
   }
 
   CrisisAnalysis _offlineHeuristic(String input) {

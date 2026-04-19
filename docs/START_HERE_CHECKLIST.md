@@ -35,7 +35,25 @@
 - Group chat supports gallery image, camera image, and voice clip attachments
 - Inline voice playback is available in chat bubbles with progress
 - Ask AI is available from the chat composer with recent context
+- AI video guidance is now context-filtered to avoid irrelevant CPR/trauma videos for non-matching prompts
+- AI bubble hides duplicate raw YouTube links when preview cards are shown
 - Role-specific chat controls are available (victim: delete chat, responder: leave chat)
+
+✅ **Cancelled SOS Cleanup Flow**:
+
+- Victim-side cancelled chat delete is enabled by deployed Firestore rules
+- Cancelling/deleting chat now cleans linked SOS documents (`emergency_requests/{sosId}` and `sos_events/{sosId}`)
+
+✅ **Chat List UI Consistency**:
+
+- My Chats and My SOS Chats use a flatter list style with separator lines
+- Responder list rows no longer show trailing chevron
+- Victim list keeps trailing chevron for navigation
+
+✅ **Repository Hygiene**:
+
+- Added `.gitattributes` for newline normalization
+- Added `node_modules` ignore rules to avoid accidental dependency commits
 
 ✅ **Pluggable Media Upload Setup**:
 
@@ -77,7 +95,8 @@
 
 - Enable Firebase Cloud Messaging in the Firebase project
 - Configure APNs key/certificate in Firebase for iOS
-- Deploy the Cloud Functions starter in `functions/`
+- Current fallback works without backend deploy while app is open (local notifications)
+- Deploy Cloud Functions in `functions/` later to enable robust background chat push
 
 1. Test Plan
 

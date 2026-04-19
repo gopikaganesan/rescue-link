@@ -8,12 +8,16 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/providers/app_settings_provider.dart';
 import '../core/services/media_upload_service.dart';
+import '../core/services/text_translation_service.dart';
 import '../core/utils/chat_message_utils.dart';
+import '../widgets/translated_text.dart';
 import '../services/chat_service.dart';
 import '../core/models/responder_model.dart';
 import 'responder_profile_screen.dart';
@@ -87,6 +91,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   final ChatService _chatService = ChatService();
   final MediaUploadService _mediaUploadService =
       MediaUploadService.fromEnvironment();
+    final TextTranslationService _textTranslationService =
+      TextTranslationService();
   final AIHighlightingController _controller = AIHighlightingController();
   final ImagePicker _imagePicker = ImagePicker();
   final SpeechToText _speechToText = SpeechToText();
@@ -127,6 +133,10 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   StreamSubscription<void>? _chatAudioCompleteSub;
   Map<String, dynamic>? _sosRequestData;
   List<String> _detectedNumbersInDraft = [];
+  final Map<String, String> _translatedMessageTextById = <String, String>{};
+  final Map<String, String> _translationSourceTextById = <String, String>{};
+  final Set<String> _translationInFlightIds = <String>{};
+  String? _lastTranslationLanguageCode;
 
   bool get _isResponder => widget.currentUserRole == 'responder';
   bool get _canManageResponders => widget.currentUserRole == 'victim';
@@ -274,7 +284,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         voiceAudioType: attachmentType == 'audio/wav' ? 'audio/wav' : null,
         voiceTranscript: _pendingVoiceTranscript,
       );
-      HapticFeedback.lightImpact();
+      _hapticLight();
 
       if (shouldAskAiFromMention) {
         final aiSent = await _requestAiReplySafely(
@@ -488,11 +498,11 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     final canRecordAudio = await _audioRecorder.hasPermission();
     if (!canRecordAudio) {
       if (mounted) {
+          final settings = context.read<AppSettingsProvider>();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content:
-                Text('Microphone permission is required for audio attach.'),
-          ),
+            SnackBar(
+              content: Text(settings.t('chat_microphone_required')),
+            ),
         );
       }
       return;
@@ -766,13 +776,19 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('RescueLink Group Chat',
-                    style: TextStyle(fontSize: 16)),
+                Text(
+                  context.read<AppSettingsProvider>().t('chat_group_title'),
+                  style: const TextStyle(fontSize: 16),
+                ),
                 Row(
                   children: [
                     const Icon(Icons.circle, size: 10, color: Colors.green),
                     const SizedBox(width: 4),
-                    Text('$responderOnlineCount Online',
+                    Text(
+                        context
+                            .read<AppSettingsProvider>()
+                            .t('chat_online_count')
+                            .replaceAll('{count}', '$responderOnlineCount'),
                         style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.normal,
@@ -818,7 +834,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                     color: Theme.of(context).colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Text('This SOS has been cancelled.'),
+                  child: Text(context.read<AppSettingsProvider>().t('chat_sos_cancelled')),
                 ),
               if (_setupStatusText != null && shouldAutoRepair)
                 Container(
@@ -840,8 +856,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                     stream: _chatService.watchMessages(widget.sosId),
                     builder: (context, snapshot) {
                       if (snapshot.hasError) {
-                        return const Center(
-                          child: Text('Failed to load messages'),
+                        return Center(
+                          child: Text(context.read<AppSettingsProvider>().t('chat_failed_load_messages')),
                         );
                       }
 
@@ -852,10 +868,19 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                       final docs = snapshot.data?.docs ??
                           const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
+                      final targetLanguageCode = context
+                          .watch<AppSettingsProvider>()
+                          .languageCode
+                          .trim()
+                          .toLowerCase();
+                      _scheduleMessageTranslations(
+                        docs: docs,
+                        targetLanguageCode: targetLanguageCode,
+                      );
+
                       if (docs.isEmpty) {
-                        return const Center(
-                          child:
-                              Text('No messages yet. Start the conversation.'),
+                        return Center(
+                          child: Text(context.read<AppSettingsProvider>().t('chat_no_messages_yet')),
                         );
                       }
 
@@ -865,6 +890,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                             horizontal: 12, vertical: 10),
                         itemCount: docs.length,
                         itemBuilder: (context, index) {
+                          final docId = docs[index].id;
                           final data = docs[index].data();
                           final senderUid =
                               (data['senderUid'] as String?) ?? '';
@@ -874,7 +900,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                             data['senderName'] as String?,
                             fallback: 'Unknown',
                           );
-                          final text = (data['text'] as String?) ?? '';
+                          final rawText = (data['text'] as String?) ?? '';
+                          final text = _translatedMessageTextById[docId] ?? rawText;
                           final attachmentUrl =
                               (data['attachmentUrl'] as String?) ?? '';
                           final voiceAudioUrl =
@@ -892,7 +919,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                           final hasAudioAttachment = chatAudioUrl.isNotEmpty &&
                               (attachmentType.contains('audio') ||
                                   voiceAudioUrl.isNotEmpty);
-                          final docId = docs[index].id;
                           final isMine = senderUid == widget.currentUserId;
 
                           final rawCreatedAt = data['createdAt'];
@@ -1078,20 +1104,67 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: <Widget>[
-                                          Text(
-                                            isAiMessage
-                                                ? '$senderName • AI'
-                                                : senderName,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .labelMedium
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w700,
-                                                  color: isAiMessage
-                                                      ? Colors.red.shade900
-                                                      : null,
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: <Widget>[
+                                              Flexible(
+                                                child: Text(
+                                                  isAiMessage
+                                                      ? '$senderName • AI'
+                                                      : senderName,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .labelMedium
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                        color: isAiMessage
+                                                            ? Colors
+                                                                .red.shade900
+                                                            : null,
+                                                      ),
                                                 ),
+                                              ),
+                                              if (text.trim().isNotEmpty) ...<Widget>[
+                                                const SizedBox(width: 6),
+                                                Semantics(
+                                                  button: true,
+                                                  label: _speakingMessageId == docId
+                                                      ? 'Stop reading this message'
+                                                      : 'Listen to this message',
+                                                  child: IconButton(
+                                                    visualDensity:
+                                                        VisualDensity.compact,
+                                                    constraints:
+                                                        const BoxConstraints(
+                                                      minWidth: 28,
+                                                      minHeight: 28,
+                                                    ),
+                                                    padding: EdgeInsets.zero,
+                                                    onPressed: () {
+                                                      _toggleMessageReadAloud(
+                                                        messageId: docId,
+                                                        senderName: senderName,
+                                                        text: text,
+                                                      );
+                                                    },
+                                                    icon: Icon(
+                                                      _speakingMessageId == docId
+                                                          ? Icons.stop_circle
+                                                          : Icons.volume_up,
+                                                      size: 16,
+                                                    ),
+                                                    tooltip:
+                                                        _speakingMessageId ==
+                                                            docId
+                                                        ? 'Stop listening'
+                                                        : 'Listen',
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
                                           ),
                                           const SizedBox(height: 6),
                                           AnimatedSize(
@@ -1104,44 +1177,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                                 : _buildLinkableText(
                                                     context, text),
                                           ),
-                                          if (text.trim().isNotEmpty) ...<Widget>[
-                                            const SizedBox(height: 4),
-                                            Align(
-                                              alignment: Alignment.centerLeft,
-                                              child: Semantics(
-                                                button: true,
-                                                label: _speakingMessageId == docId
-                                                    ? 'Stop reading this message'
-                                                    : 'Listen to this message',
-                                                child: IconButton(
-                                                  visualDensity:
-                                                      VisualDensity.compact,
-                                                  constraints: const BoxConstraints(
-                                                    minWidth: 32,
-                                                    minHeight: 32,
-                                                  ),
-                                                  padding: EdgeInsets.zero,
-                                                  onPressed: () {
-                                                    _toggleMessageReadAloud(
-                                                      messageId: docId,
-                                                      senderName: senderName,
-                                                      text: text,
-                                                    );
-                                                  },
-                                                  icon: Icon(
-                                                    _speakingMessageId == docId
-                                                        ? Icons.stop_circle
-                                                        : Icons.volume_up,
-                                                    size: 18,
-                                                  ),
-                                                  tooltip:
-                                                      _speakingMessageId == docId
-                                                      ? 'Stop listening'
-                                                      : 'Listen',
-                                                ),
-                                              ),
-                                            ),
-                                          ],
                                           if (hasImageAttachment) ...<Widget>[
                                             const SizedBox(height: 8),
                                             ClipRRect(
@@ -1250,7 +1285,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                                 .primary,
                                           ),
                                     label: Text(
-                                      'Ask AI Assistant',
+                                      context.read<AppSettingsProvider>().t('chat_ask_ai_assistant'),
                                       style: TextStyle(
                                         color: Theme.of(context)
                                             .colorScheme
@@ -1428,7 +1463,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                   if (canSendInChat) _send();
                                 },
                                 decoration: InputDecoration(
-                                  hintText: 'Type a message',
+                                  hintText: context.read<AppSettingsProvider>().t('chat_type_message'),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(20),
                                   ),
@@ -1442,8 +1477,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                         ? _toggleVoiceTranscription
                                         : null,
                                     tooltip: _isTranscribing
-                                        ? 'Stop dictation'
-                                        : 'Start dictation',
+                                      ? context.read<AppSettingsProvider>().t('chat_stop_dictation')
+                                      : context.read<AppSettingsProvider>().t('chat_start_dictation'),
                                   ),
                                   suffixIcon: Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -1800,9 +1835,9 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     try {
       // Show loading indicator
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Fetching responder profile...'),
-          duration: Duration(milliseconds: 500),
+        SnackBar(
+          content: Text(context.read<AppSettingsProvider>().t('chat_fetching_profile')),
+          duration: const Duration(milliseconds: 500),
         ),
       );
 
@@ -1814,7 +1849,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
       if (!snapshot.exists) {
         messenger.showSnackBar(
-          const SnackBar(content: Text('Responder profile not found.')),
+          SnackBar(content: Text(context.read<AppSettingsProvider>().t('chat_profile_not_found'))),
         );
         return;
       }
@@ -1835,7 +1870,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       );
     } catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Failed to load profile: $e')),
+        SnackBar(content: Text('${context.read<AppSettingsProvider>().t('chat_failed_load_profile')}$e')),
       );
     }
   }
@@ -1927,7 +1962,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         }
 
         return PopupMenuButton<String>(
-          tooltip: 'Chat actions',
+          tooltip: context.read<AppSettingsProvider>().t('chat_actions_tooltip'),
           onSelected: (value) {
             if (value == 'view_responders') {
               _showRespondersList(context, contextParticipants);
@@ -1946,28 +1981,28 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             }
           },
           itemBuilder: (context) => <PopupMenuEntry<String>>[
-            const PopupMenuItem<String>(
+            PopupMenuItem<String>(
               value: 'view_responders',
-              child: Text('View Responders'),
+              child: Text(context.read<AppSettingsProvider>().t('chat_view_responders')),
             ),
             if (canShowNotificationToggle)
               PopupMenuItem<String>(
                 value: 'toggle_notifications',
                 child: Text(
                   chatNotificationsEnabled
-                      ? 'Disable chat notifications'
-                      : 'Enable chat notifications',
+                      ? context.read<AppSettingsProvider>().t('menu_disable_notifications')
+                      : context.read<AppSettingsProvider>().t('menu_enable_notifications'),
                 ),
               ),
             if (canDeleteForVictim)
-              const PopupMenuItem<String>(
+              PopupMenuItem<String>(
                 value: 'delete_chat',
-                child: Text('Delete Chat (Victim)'),
+                child: Text(context.read<AppSettingsProvider>().t('chat_delete_chat_victim')),
               ),
             if (canLeaveForResponder)
-              const PopupMenuItem<String>(
+              PopupMenuItem<String>(
                 value: 'leave_chat',
-                child: Text('Leave Chat (Responder)'),
+                child: Text(context.read<AppSettingsProvider>().t('chat_leave_chat_responder')),
               ),
           ],
         );
@@ -1993,7 +2028,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Active Responders (${responders.length})',
+                context.read<AppSettingsProvider>().t('chat_active_responders').replaceAll('{count}', '${responders.length}'),
                 style: Theme.of(ctx)
                     .textTheme
                     .titleLarge
@@ -2040,7 +2075,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                         title: Text(name,
                             style:
                                 const TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: const Text('Tap avatar for profile'),
+                        subtitle: Text(context.read<AppSettingsProvider>().t('chat_tap_avatar_profile')),
                         trailing: PopupMenuButton<String>(
                           icon: const Icon(Icons.more_horiz),
                           onSelected: (value) {
@@ -2253,7 +2288,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   Future<void> _toggleChatAudioPlayback(String audioUrl) async {
-    HapticFeedback.selectionClick();
+    _hapticSelection();
     if (_playingChatAudioUrl == audioUrl) {
       if (_isChatAudioPlaying) {
         await _chatAudioPlayer.pause();
@@ -2306,7 +2341,160 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     unawaited(_flutterTts.setSpeechRate(0.46));
     unawaited(_flutterTts.setPitch(1.0));
     unawaited(_flutterTts.setVolume(1.0));
-    unawaited(_flutterTts.setLanguage('en-IN'));
+    unawaited(_applyPreferredTtsLanguage());
+  }
+
+  void _scheduleMessageTranslations({
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    required String targetLanguageCode,
+  }) {
+    if (_lastTranslationLanguageCode != targetLanguageCode) {
+      _lastTranslationLanguageCode = targetLanguageCode;
+      _translatedMessageTextById.clear();
+      _translationSourceTextById.clear();
+      _translationInFlightIds.clear();
+    }
+
+    for (final doc in docs) {
+      final docId = doc.id;
+      final data = doc.data();
+      final rawText = ((data['text'] as String?) ?? '').trim();
+      if (rawText.isEmpty) {
+        continue;
+      }
+
+      final lastSource = _translationSourceTextById[docId];
+      if (lastSource == rawText && _translatedMessageTextById.containsKey(docId)) {
+        continue;
+      }
+      if (_translationInFlightIds.contains(docId)) {
+        continue;
+      }
+
+      _translationInFlightIds.add(docId);
+      unawaited(_translateAndCacheMessage(
+        docId: docId,
+        rawText: rawText,
+        targetLanguageCode: targetLanguageCode,
+      ));
+    }
+  }
+
+  Future<void> _translateAndCacheMessage({
+    required String docId,
+    required String rawText,
+    required String targetLanguageCode,
+  }) async {
+    final translated = await _textTranslationService.translate(
+      text: rawText,
+      targetLanguageCode: targetLanguageCode,
+    );
+
+    _translationInFlightIds.remove(docId);
+    if (!mounted) {
+      return;
+    }
+
+    if (_lastTranslationLanguageCode != targetLanguageCode) {
+      return;
+    }
+
+    setState(() {
+      _translationSourceTextById[docId] = rawText;
+      _translatedMessageTextById[docId] = translated;
+    });
+  }
+
+  Future<void> _applyPreferredTtsLanguage({String? preferredLocale}) async {
+    final languageCode =
+        context.read<AppSettingsProvider>().languageCode.trim().toLowerCase();
+    final appPreferredLocale = _preferredTtsLocale(languageCode);
+    final localeCandidates = <String>[
+      if (preferredLocale != null && preferredLocale.trim().isNotEmpty)
+        preferredLocale.trim(),
+      appPreferredLocale,
+      'en-IN',
+      'en-US',
+    ];
+
+    final triedLocales = <String>{};
+    for (final locale in localeCandidates) {
+      if (!triedLocales.add(locale)) {
+        continue;
+      }
+      try {
+        await _flutterTts.setLanguage(locale);
+        return;
+      } catch (_) {
+        // Keep trying the next locale until one is supported.
+      }
+    }
+  }
+
+  String? _ttsLocaleFromDisplayedText(String text) {
+    final safeText = text.trim();
+    if (safeText.isEmpty) {
+      return null;
+    }
+
+    if (RegExp(r'[\u0B80-\u0BFF]').hasMatch(safeText)) {
+      return 'ta-IN';
+    }
+    if (RegExp(r'[\u0C00-\u0C7F]').hasMatch(safeText)) {
+      return 'te-IN';
+    }
+    if (RegExp(r'[\u0C80-\u0CFF]').hasMatch(safeText)) {
+      return 'kn-IN';
+    }
+    if (RegExp(r'[\u0D00-\u0D7F]').hasMatch(safeText)) {
+      return 'ml-IN';
+    }
+    if (RegExp(r'[\u0980-\u09FF]').hasMatch(safeText)) {
+      return 'bn-IN';
+    }
+    if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(safeText)) {
+      return 'gu-IN';
+    }
+    if (RegExp(r'[\u0A00-\u0A7F]').hasMatch(safeText)) {
+      return 'pa-IN';
+    }
+    if (RegExp(r'[\u0B00-\u0B7F]').hasMatch(safeText)) {
+      return 'or-IN';
+    }
+    if (RegExp(r'[\u0900-\u097F]').hasMatch(safeText)) {
+      return 'hi-IN';
+    }
+    if (RegExp(r'[\u3040-\u30FF]').hasMatch(safeText)) {
+      return 'ja-JP';
+    }
+    if (RegExp(r'[\uAC00-\uD7AF]').hasMatch(safeText)) {
+      return 'ko-KR';
+    }
+    if (RegExp(r'[\u4E00-\u9FFF]').hasMatch(safeText)) {
+      return 'zh-CN';
+    }
+
+    return null;
+  }
+
+  String _preferredTtsLocale(String languageCode) {
+    const localeByLanguage = <String, String>{
+      'en': 'en-IN',
+      'hi': 'hi-IN',
+      'ta': 'ta-IN',
+      'te': 'te-IN',
+      'kn': 'kn-IN',
+      'bn': 'bn-IN',
+      'mr': 'mr-IN',
+      'gu': 'gu-IN',
+      'pa': 'pa-IN',
+      'or': 'or-IN',
+      'ml': 'ml-IN',
+      'zh': 'zh-CN',
+      'ja': 'ja-JP',
+      'ko': 'ko-KR',
+    };
+    return localeByLanguage[languageCode] ?? 'en-IN';
   }
 
   Future<void> _toggleMessageReadAloud({
@@ -2327,7 +2515,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       setState(() {
         _speakingMessageId = null;
       });
-      HapticFeedback.selectionClick();
+      _hapticSelection();
       return;
     }
 
@@ -2338,8 +2526,10 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     setState(() {
       _speakingMessageId = messageId;
     });
-    HapticFeedback.lightImpact();
-    await _flutterTts.speak('Message from $senderName. $safeText');
+    _hapticLight();
+    final textLocale = _ttsLocaleFromDisplayedText(safeText);
+    await _applyPreferredTtsLanguage(preferredLocale: textLocale);
+    await _flutterTts.speak(safeText);
   }
 
   String _buildMessageSemanticLabel({
@@ -2373,7 +2563,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         userId: widget.currentUserId,
         enabled: enabled,
       );
-      HapticFeedback.selectionClick();
+      _hapticSelection();
       if (!mounted) {
         return;
       }
@@ -2396,6 +2586,22 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         ),
       );
     }
+  }
+
+  void _hapticLight() {
+    final enabled = context.read<AppSettingsProvider>().hapticsEnabled;
+    if (!enabled) {
+      return;
+    }
+    HapticFeedback.lightImpact();
+  }
+
+  void _hapticSelection() {
+    final enabled = context.read<AppSettingsProvider>().hapticsEnabled;
+    if (!enabled) {
+      return;
+    }
+    HapticFeedback.selectionClick();
   }
 
   String _formatDuration(Duration duration) {
@@ -2451,7 +2657,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           victimUid: widget.currentUserId,
           victimName: widget.currentUserName,
           sosMessage: overviewMessage.trim().isEmpty
-              ? 'Potential emergency needs urgent support.'
+              ? context.read<AppSettingsProvider>().t('sos_default_message')
               : overviewMessage,
           media: overviewMedia,
         );
@@ -2735,7 +2941,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.person_outline),
-              title: const Text('View Profile'),
+              title: Text(context.read<AppSettingsProvider>().t('chat_view_profile')),
               onTap: () {
                 Navigator.pop(ctx);
                 if (isAi) {
@@ -2756,13 +2962,13 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             ),
             ListTile(
               leading: const Icon(Icons.rate_review_outlined),
-              title: const Text('Review & Rating'),
+              title: Text(context.read<AppSettingsProvider>().t('profile_rate_review')),
               onTap: () {
                 Navigator.pop(ctx);
                 if (isAi) {
                   messenger.showSnackBar(
-                    const SnackBar(
-                        content: Text('AI Assistant cannot be reviewed.')),
+                    SnackBar(
+                        content: Text(context.read<AppSettingsProvider>().t('chat_ai_cannot_review'))),
                   );
                   return;
                 }
@@ -2921,8 +3127,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                   maxLines: 4,
                   maxLength: 400,
                   enabled: !isSubmitting,
-                  decoration: const InputDecoration(
-                    hintText: 'Describe your experience...',
+                  decoration: InputDecoration(
+                    hintText: context.read<AppSettingsProvider>().t('chat_describe_experience'),
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -3067,7 +3273,9 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      isExpanded ? 'Emergency Overview' : message,
+                      isExpanded
+                          ? context.read<AppSettingsProvider>().t('chat_emergency_overview')
+                          : message,
                       style: Theme.of(context)
                           .textTheme
                           .titleSmall
@@ -3113,7 +3321,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
               ),
               if (isExpanded) ...<Widget>[
                 const SizedBox(height: 10),
-                Text(message),
+                TranslatedText(message),
                 // Show SOS trigger location if available
                 Builder(builder: (context) {
                   final lat = _asDouble(overview['latitude']);

@@ -37,6 +37,15 @@ For release builds:
 
 - Android/iOS CI or local release command should include the same `--dart-define`.
 
+Optional model override (for trying alternative available Gemini models):
+
+- `GEMINI_MODEL_CANDIDATES`: comma-separated model names in priority order.
+- Alias also supported: `GEMINI_MODELS`.
+
+Example:
+
+- `GEMINI_MODEL_CANDIDATES=gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-1.5-flash-latest`
+
 If no key is provided, the app uses offline heuristic classification.
 
 **Simulation Note**: When testing with simulation modes enabled (tower failure, satellite device, or mesh/satellite delivery modes), emergency classification automatically uses offline heuristic only, regardless of Gemini key availability. See [docs/SIMULATION_MODES.md](SIMULATION_MODES.md) for details.
@@ -44,6 +53,18 @@ If no key is provided, the app uses offline heuristic classification.
 ## 3) Notifications
 
 Current implementation uses local notifications for responder dispatch while app is active.
+
+Chat message notifications are currently implemented in open-app mode:
+
+- Human (non-AI) chat messages can trigger local notifications while the app is running.
+- Tapping chat notifications navigates directly to the related group chat screen.
+- Per-chat notifications are enabled by default and can be disabled from the group chat 3-dot menu.
+
+SOS responder notifications support quick actions (where supported):
+
+- Accept: accepts the request and opens the responder group chat.
+- Navigate: opens map navigation for the SOS location when available.
+- Fallback: opens the responder requests screen if location/action context is incomplete.
 
 FCM client setup is now included in app code (token sync + topic subscription + foreground/background handler).
 
@@ -157,6 +178,12 @@ For true background immediate alerts, add Firebase Cloud Messaging server-side d
 - Store responder FCM tokens
 - Trigger topic or targeted push by category and geo filter
 - Keep local fallback notifications for foreground mode
+
+Note for this repository state:
+
+- Cloud Function-based chat message push dispatch is prepared in `functions/index.js` but deployment is deferred.
+- Reason: Firebase project plan/API prerequisites must be upgraded/configured before function deploy.
+- Until deployment is completed, foreground/open-app local notifications are the active notification path.
 
 Recommended topic strategy used by app:
 

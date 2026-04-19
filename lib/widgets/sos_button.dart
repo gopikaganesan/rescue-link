@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import '../core/providers/app_settings_provider.dart';
 import 'dart:math' as math;
 
 class SOSButton extends StatefulWidget {
@@ -64,11 +66,12 @@ class _SOSButtonState extends State<SOSButton>
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.read<AppSettingsProvider>();
     return Semantics(
       button: true,
       enabled: !widget.isLoading,
-      label: 'Emergency SOS button',
-      hint: 'Tap to alert nearby responders. Long press to cancel.',
+      label: settings.t('sos_button_accessibility_label'),
+      hint: settings.t('sos_button_accessibility_hint'),
       child: GestureDetector(
         onTap: widget.isLoading ? null : _handlePress,
         child: AnimatedBuilder(
@@ -153,7 +156,7 @@ class _SOSButtonState extends State<SOSButton>
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Text(
-                                  'SOS',
+                                  settings.t('sos_button_label'),
                                   style: Theme.of(context)
                                       .textTheme
                                       .headlineMedium
@@ -165,7 +168,7 @@ class _SOSButtonState extends State<SOSButton>
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'TAP',
+                                  settings.t('sos_button_tap'),
                                   style: Theme.of(context)
                                       .textTheme
                                       .labelSmall
