@@ -2,9 +2,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/emergency_request_model.dart';
+import '../../services/chat_service.dart';
 
 class EmergencyRequestProvider extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ChatService _chatService = ChatService();
 
   List<EmergencyRequestModel> _openRequests = <EmergencyRequestModel>[];
   final List<EmergencyRequestModel> _pendingSyncRequests =
@@ -101,6 +103,24 @@ class EmergencyRequestProvider extends ChangeNotifier {
 
     try {
       await doc.set(payload.toMap()).timeout(const Duration(seconds: 5));
+
+      // Best-effort chat bootstrap. Existing transaction logic in ChatService
+      // prevents duplicate chat creation if another flow already created it.
+      try {
+        await _chatService.createChatOnSos(
+          sosId: doc.id,
+          victimUid: requesterUserId,
+          victimName: requesterName,
+          sosMessage: originalMessage,
+          media: _buildOverviewMedia(
+            attachmentUrl: attachmentUrl,
+            attachmentType: attachmentType,
+            voiceAudioUrl: voiceAudioUrl,
+            voiceAudioType: voiceAudioType,
+          ),
+        );
+      } catch (_) {}
+
       return doc.id; // Return the request ID
     } catch (e) {
       _error = 'SOS saved locally. Cloud sync pending.';
@@ -119,6 +139,11 @@ class EmergencyRequestProvider extends ChangeNotifier {
         'status': 'cancelled',
         'cancelledAt': FieldValue.serverTimestamp(),
       }).timeout(const Duration(seconds: 5));
+
+      // Keep SOS cancel flow resilient: chat cancel is best-effort.
+      try {
+        await _chatService.cancelChatFromSosId(sosId: requestId);
+      } catch (_) {}
 
       _openRequests = _openRequests.where((item) => item.id != requestId).toList();
       notifyListeners();
@@ -143,6 +168,23 @@ class EmergencyRequestProvider extends ChangeNotifier {
             .doc(request.id)
             .set(request.toMap())
             .timeout(const Duration(seconds: 5));
+
+        // Keep chat thread creation aligned with SOS creation after delayed sync.
+        try {
+          await _chatService.createChatOnSos(
+            sosId: request.id,
+            victimUid: request.requesterUserId,
+            victimName: request.requesterName,
+            sosMessage: request.originalMessage,
+            media: _buildOverviewMedia(
+              attachmentUrl: request.attachmentUrl,
+              attachmentType: request.attachmentType,
+              voiceAudioUrl: request.voiceAudioUrl,
+              voiceAudioType: request.voiceAudioType,
+            ),
+          );
+        } catch (_) {}
+
         _pendingSyncRequests.removeWhere((item) => item.id == request.id);
       } catch (_) {
         break;
@@ -171,5 +213,29 @@ class EmergencyRequestProvider extends ChangeNotifier {
       _error = 'Request accepted locally. Cloud sync pending.';
       notifyListeners();
     }
+  }
+
+  List<Map<String, dynamic>> _buildOverviewMedia({
+    String? attachmentUrl,
+    String? attachmentType,
+    String? voiceAudioUrl,
+    String? voiceAudioType,
+  }) {
+    return <Map<String, dynamic>>[
+      if (attachmentUrl != null && attachmentUrl.trim().isNotEmpty)
+        <String, dynamic>{
+          'url': attachmentUrl.trim(),
+          'type': (attachmentType == null || attachmentType.trim().isEmpty)
+              ? 'image'
+              : attachmentType.trim(),
+        },
+      if (voiceAudioUrl != null && voiceAudioUrl.trim().isNotEmpty)
+        <String, dynamic>{
+          'url': voiceAudioUrl.trim(),
+          'type': (voiceAudioType == null || voiceAudioType.trim().isEmpty)
+              ? 'audio'
+              : voiceAudioType.trim(),
+        },
+    ];
   }
 }

@@ -32,16 +32,14 @@ service cloud.firestore {
 
     match /sos_events/{eventId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn();
     }
 
     match /emergency_requests/{requestId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.requesterUserId == request.auth.uid;
-      allow update: if isSignedIn();
-      allow delete: if false;
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn();
     }
 
     match /responder_verification_requests/{requestId} {
@@ -49,6 +47,30 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow delete: if false;
+    }
+
+    match /chats/{chatId} {
+      // Allow any signed in user to read and update chats for now
+      // This is the functional "Loosened" state that works for the hackathon
+      allow read, update: if isSignedIn();
+      allow create: if isSignedIn();
+      allow delete: if isSignedIn()
+        && resource.data.status == 'cancelled'
+        && resource.data.participantUids.hasAny([request.auth.uid]);
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update: if false;
+        allow delete: if isSignedIn()
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.status == 'cancelled'
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.participantUids.hasAny([request.auth.uid]);
+      }
+    }
+
+    match /responder_reviews/{reviewId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
     }
   }
 }

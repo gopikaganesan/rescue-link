@@ -3,9 +3,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../core/providers/auth_provider.dart';
 import '../core/providers/location_provider.dart';
+import '../core/providers/app_settings_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/models/responder_model.dart';
+import 'responder_chat_list_screen.dart';
+import 'victim_chat_list_screen.dart';
 import 'responder_profile_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -72,9 +76,6 @@ class _MapScreenState extends State<MapScreen> {
       widget.targetLatitude != null && widget.targetLongitude != null;
 
   Future<void> _openExternalNavigation() async {
-    print("==========================================================================================================================================================");
-    print(widget.targetLatitude);
-    print(widget.targetLongitude);
     if (!_hasTarget) {
       return;
     }
@@ -106,6 +107,7 @@ class _MapScreenState extends State<MapScreen> {
     double userLng,
     List<ResponderModel> responders,
   ) {
+    final settings = context.read<AppSettingsProvider>();
     final markers = <Marker>[
       Marker(
         point: LatLng(userLat, userLng),
@@ -123,7 +125,7 @@ class _MapScreenState extends State<MapScreen> {
           height: 48,
           child: Tooltip(
             message:
-                '${responder.name}\n${responder.skillsArea} • ${responder.responderType}\n${responder.distanceToLocation(userLat, userLng).toStringAsFixed(1)} km',
+                '${settings.localizedDisplayName(responder.name)}\n${settings.localizedSkill(responder.skillsArea)} • ${settings.localizedResponderType(responder.responderType)}\n${settings.t('map_away_km').replaceAll('{distance}', responder.distanceToLocation(userLat, userLng).toStringAsFixed(1))}',
             child: Icon(
               _iconForSkill(responder.skillsArea),
               color: _colorForSkill(responder.skillsArea),
@@ -141,7 +143,7 @@ class _MapScreenState extends State<MapScreen> {
           width: 52,
           height: 52,
           child: Tooltip(
-            message: widget.targetTitle ?? 'Help Request',
+            message: widget.targetTitle ?? settings.t('map_help_request'),
             child: const Icon(Icons.emergency, color: Colors.deepOrange, size: 38),
           ),
         ),
@@ -170,14 +172,46 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<AppSettingsProvider>();
     return Scaffold(
       appBar: AppBar(
-        title: Text(_hasTarget ? 'Navigation Map' : 'Responders Map'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () async {
+            final navigator = Navigator.of(context);
+            final auth = context.read<AuthProvider>();
+            final didPop = await navigator.maybePop();
+            if (didPop) return;
+            if (!mounted) return;
+
+            if (auth.currentUser?.isResponder == true) {
+              navigator.pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => ResponderChatListScreen(
+                    currentUserId: auth.currentUser!.id,
+                    currentUserName: auth.currentUser!.displayName,
+                  ),
+                ),
+              );
+            } else {
+              navigator.pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => VictimChatListScreen(
+                    currentUserId: auth.currentUser?.id ?? '',
+                    currentUserName: auth.currentUser?.displayName ?? '',
+                  ),
+                ),
+              );
+            }
+          },
+          tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+        ),
+        title: Text(_hasTarget ? settings.t('map_navigation_map') : settings.t('map_responders_map')),
         actions: [
           IconButton(
             icon: const Icon(Icons.my_location),
             onPressed: _focusUserLocation,
-            tooltip: 'Center on my location',
+            tooltip: settings.t('map_center_location'),
           ),
         ],
       ),
@@ -191,7 +225,7 @@ class _MapScreenState extends State<MapScreen> {
                   const Icon(Icons.location_off, size: 50),
                   const SizedBox(height: 16),
                   Text(
-                    'Location not available',
+                    settings.t('map_location_not_available'),
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                   if (locationProvider.error != null) ...[
@@ -219,14 +253,14 @@ class _MapScreenState extends State<MapScreen> {
                           await locationProvider.openLocationSettings();
                         },
                         icon: const Icon(Icons.gps_fixed),
-                        label: const Text('Turn On Location'),
+                        label: Text(settings.t('map_turn_on_location')),
                       ),
                       OutlinedButton.icon(
                         onPressed: () async {
                           await locationProvider.openPermissionSettings();
                         },
                         icon: const Icon(Icons.app_settings_alt),
-                        label: const Text('Grant Permission'),
+                        label: Text(settings.t('map_grant_permission')),
                       ),
                       TextButton.icon(
                         onPressed: () async {
@@ -235,7 +269,7 @@ class _MapScreenState extends State<MapScreen> {
                           );
                         },
                         icon: const Icon(Icons.refresh),
-                        label: const Text('Retry'),
+                        label: Text(settings.t('map_retry')),
                       ),
                     ],
                   ),
@@ -328,8 +362,8 @@ class _MapScreenState extends State<MapScreen> {
                       children: [
                         Text(
                           _hasTarget
-                              ? 'Destination: ${widget.targetTitle ?? 'Help Request'}'
-                              : 'Nearby Responders (5km radius)',
+                              ? settings.t('map_destination').replaceAll('{title}', widget.targetTitle ?? settings.t('map_help_request'))
+                              : settings.t('map_nearby_responders'),
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         if (_hasTarget)
@@ -340,7 +374,7 @@ class _MapScreenState extends State<MapScreen> {
                               child: ElevatedButton.icon(
                                 onPressed: _openExternalNavigation,
                                 icon: const Icon(Icons.directions),
-                                label: const Text('Open Turn-by-Turn Navigation'),
+                                label: Text(settings.t('map_open_navigation')),
                               ),
                             ),
                           ),
@@ -349,7 +383,7 @@ class _MapScreenState extends State<MapScreen> {
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(
-                              'No responders nearby',
+                              settings.t('map_no_responders_nearby'),
                               style: Theme.of(context)
                                   .textTheme
                                   .bodyMedium
@@ -408,7 +442,7 @@ class _MapScreenState extends State<MapScreen> {
                                           ),
                                         ),
                                         Text(
-                                          responder.skillsArea,
+                                          settings.localizedSkill(responder.skillsArea),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: Theme.of(context)
@@ -420,7 +454,7 @@ class _MapScreenState extends State<MapScreen> {
                                           ),
                                         ),
                                         Text(
-                                          responder.responderType,
+                                          settings.localizedResponderType(responder.responderType),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: Theme.of(context)
@@ -428,7 +462,9 @@ class _MapScreenState extends State<MapScreen> {
                                               .labelSmall,
                                         ),
                                         Text(
-                                          '${distance.toStringAsFixed(1)} km away',
+                                          settings
+                                              .t('map_away_km')
+                                              .replaceAll('{distance}', distance.toStringAsFixed(1)),
                                           style: Theme.of(context)
                                               .textTheme
                                               .bodySmall,
@@ -443,7 +479,7 @@ class _MapScreenState extends State<MapScreen> {
                                               locationProvider.longitude!,
                                             ),
                                             icon: const Icon(Icons.person, size: 16),
-                                            label: const Text('View profile'),
+                                            label: Text(settings.t('map_view_profile')),
                                             style: TextButton.styleFrom(
                                               padding: EdgeInsets.zero,
                                               minimumSize: const Size(0, 0),

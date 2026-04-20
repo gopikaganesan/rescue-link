@@ -1,0 +1,21 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Static shortcut for SOS -->
+    <shortcut
+        android:shortcutId="sos_trigger"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_short_label_sos"
+        android:shortcutLongLabel="@string/shortcut_long_label_trigger_emergency_sos">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="rescue-link://sos" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <!-- Support for Google Assistant App Actions -->
+    <capability android:name="actions.intent.OPEN_APP_FEATURE">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="rescue-link://sos{?message}" />
+    </capability>
+</shortcuts>

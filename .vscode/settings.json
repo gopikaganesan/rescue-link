@@ -1,0 +1,5 @@
+{
+  "markdownlint.ignore": [
+    "**/node_modules/**"
+  ]
+}
