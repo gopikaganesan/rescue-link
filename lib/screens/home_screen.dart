@@ -18,12 +18,14 @@ import '../core/providers/comms_provider.dart';
 import '../core/providers/crisis_provider.dart';
 import '../core/providers/emergency_request_provider.dart';
 import '../core/providers/location_provider.dart';
+import '../core/providers/sos_status_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/services/notification_service.dart';
 import '../core/services/responder_matching_service.dart';
 import '../core/services/sos_service.dart';
 import 'auth_screen.dart';
 import 'group_chat_screen.dart';
+import 'sos_history_screen.dart';
 import 'victim_chat_list_screen.dart';
 import 'responder_chat_list_screen.dart';
 import 'responder_registration_screen.dart';
@@ -32,6 +34,13 @@ import 'map_screen.dart';
 import '../widgets/account_sheet.dart';
 import '../widgets/sos_button.dart';
 
+enum _HomeHeaderMenuOption {
+  language,
+  accessibility,
+  commsSimulation,
+  viewSosHistory,
+  aboutApp,
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -43,20 +52,20 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _isSosInProgress = false;
   Timer? _responderPollingTimer;
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
-    _openChatHeadsSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _openChatHeadsSub;
   final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
-    _openChatMessageSubs =
-    <String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>{};
-  final Map<String, bool> _chatNotificationPreferenceBySosId =
-    <String, bool>{};
+      _openChatMessageSubs =
+      <String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>{};
+  final Map<String, bool> _chatNotificationPreferenceBySosId = <String, bool>{};
   final Set<String> _primedChatSosIds = <String>{};
-  final Map<String, String> _lastSeenChatMessageIdBySosId =
-    <String, String>{};
+  final Map<String, String> _lastSeenChatMessageIdBySosId = <String, String>{};
   String? _chatWatcherUserId;
   final Set<String> _notifiedRequestIds = <String>{};
   String _lastDeliveryRoute = '';
   String? _currentSosRequestId; // Track current SOS for cancellation
+  bool _isSosDialogVisible = false;
+  bool _isSosCancelRequested = false;
+  SosCancellationToken? _sosCancellationToken;
   final ImagePicker _imagePicker = ImagePicker();
   final SpeechToText _speechToText = SpeechToText();
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -92,6 +101,11 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isPreviewPlaying = false;
       });
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final sosStatus = context.read<SosStatusProvider>();
+      sosStatus.addListener(_onSosStatusChanged);
+      _onSosStatusChanged();
     });
   }
 
@@ -268,7 +282,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final data = doc.data();
         final preferences = (data['notificationPreferences'] as Map?) ??
             const <String, dynamic>{};
-        _chatNotificationPreferenceBySosId[doc.id] = preferences[user.id] != false;
+        _chatNotificationPreferenceBySosId[doc.id] =
+            preferences[user.id] != false;
 
         if (!_openChatMessageSubs.containsKey(doc.id)) {
           _watchLatestChatMessage(doc.id, user.id);
@@ -330,10 +345,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final senderName =
           ((data['senderName'] as String?)?.trim().isNotEmpty ?? false)
-          ? context
-            .read<AppSettingsProvider>()
-            .localizedDisplayName((data['senderName'] as String).trim())
-          : context.read<AppSettingsProvider>().t('name_participant');
+              ? context
+                  .read<AppSettingsProvider>()
+                  .localizedDisplayName((data['senderName'] as String).trim())
+              : context.read<AppSettingsProvider>().t('name_participant');
       final text = (data['text'] as String?)?.trim() ?? '';
       final preview = text.isEmpty
           ? 'Sent an attachment'
@@ -369,6 +384,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    _sosCancellationToken = SosCancellationToken();
+    _isSosCancelRequested = false;
     setState(() {
       _isSosInProgress = true;
     });
@@ -378,7 +395,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final commsProvider = context.read<CommsProvider>();
       final responderProvider = context.read<ResponderProvider>();
       final appSettings = context.read<AppSettingsProvider>();
-      
+
       // Execute the SOS flow via the service
       final requestId = await sosService.triggerSos(
         context,
@@ -386,21 +403,25 @@ class _HomeScreenState extends State<HomeScreen> {
         imageFile: _selectedImage,
         voiceAudioPath: _voiceAudioPath,
         forceCritical: _forceCriticalSeverity,
+        cancelToken: _sosCancellationToken,
       );
 
       if (!mounted) return;
 
       if (requestId != null) {
         _currentSosRequestId = requestId;
-        
+        context.read<SosStatusProvider>().setActiveSos(requestId);
+
         // Track the route (for UI feedback)
         _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
           settings: appSettings,
           cloudWriteSucceeded: true,
           hasNearbyResponders: responderProvider.nearbyResponders.isNotEmpty,
         );
-        
+
         _showSOSConfirmation();
+      } else if (_isSosCancelRequested) {
+        _showSnackBar('SOS send was cancelled.');
       } else {
         _showSnackBar('SOS could not complete. Check permissions or network.');
       }
@@ -417,6 +438,78 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Note: The previous logic (lines 354-574) is now encapsulated in SosService.
+
+  Future<void> _cancelActiveSosButton(String? requestId) async {
+    if (requestId == null) {
+      return;
+    }
+
+    final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final settings = context.read<AppSettingsProvider>();
+
+    final cancelled = await emergencyRequestProvider.cancelRequest(requestId);
+    if (!mounted) {
+      return;
+    }
+
+    if (cancelled) {
+      context.read<SosStatusProvider>().clearActiveSos();
+      setState(() {
+        _currentSosRequestId = null;
+      });
+      messenger.showSnackBar(
+        SnackBar(
+            content: Text('${settings.t('button_cancel_sos')} successful.')),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Unable to cancel SOS. Please try again.')),
+      );
+    }
+  }
+
+  void _onSosStatusChanged() {
+    final sosStatus = context.read<SosStatusProvider>();
+    if (sosStatus.hasActiveSos && !_isSosDialogVisible && mounted) {
+      _currentSosRequestId = sosStatus.activeSosId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        if (!_isSosDialogVisible) {
+          _showSOSConfirmation();
+        }
+      });
+    }
+  }
+
+  Future<void> _cancelPendingSos() async {
+    if (!_isSosInProgress) {
+      return;
+    }
+
+    _sosCancellationToken?.cancel();
+    _isSosCancelRequested = true;
+    setState(() {
+      _isSosInProgress = false;
+    });
+    _showSnackBar('SOS send was cancelled.');
+  }
+
+  void _openSosHistory() {
+    final auth = context.read<AuthProvider>();
+    final user = auth.currentUser;
+    if (user == null) {
+      return;
+    }
+
+    SosHistoryScreen.open(
+      context,
+      currentUserId: user.id,
+      currentUserName: user.displayName,
+    );
+  }
 
   Future<void> _pulseFlash() async {
     try {
@@ -438,6 +531,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
     final messenger = ScaffoldMessenger.of(context);
 
+    _isSosDialogVisible = true;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -592,7 +686,8 @@ class _HomeScreenState extends State<HomeScreen> {
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.close),
-            label: Text(context.read<AppSettingsProvider>().t('button_cancel_sos')),
+            label: Text(
+                context.read<AppSettingsProvider>().t('button_cancel_sos')),
           ),
           const SizedBox(width: 8),
           // View Map button
@@ -606,7 +701,8 @@ class _HomeScreenState extends State<HomeScreen> {
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.map),
-            label: Text(context.read<AppSettingsProvider>().t('button_view_map')),
+            label:
+                Text(context.read<AppSettingsProvider>().t('button_view_map')),
           ),
           if (_currentSosRequestId != null) ...[
             const SizedBox(width: 8),
@@ -620,7 +716,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 foregroundColor: Colors.white,
               ),
               icon: const Icon(Icons.chat_bubble_outline),
-              label: Text(context.read<AppSettingsProvider>().t('button_open_chat')),
+              label: Text(
+                  context.read<AppSettingsProvider>().t('button_open_chat')),
             ),
           ],
           if (responderProvider.nearbyResponders.isEmpty) ...[
@@ -636,12 +733,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 foregroundColor: Colors.white,
               ),
               icon: const Icon(Icons.call),
-              label: Text(context.read<AppSettingsProvider>().t('button_call_emergency')),
+              label: Text(context
+                  .read<AppSettingsProvider>()
+                  .t('button_call_emergency')),
             ),
           ],
         ],
       ),
-    );
+    ).then((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isSosDialogVisible = false;
+      });
+    });
 
     _announce(context.read<AppSettingsProvider>().t('status_sos_activated'));
   }
@@ -662,6 +768,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    context.read<SosStatusProvider>().clearActiveSos();
+    _currentSosRequestId = null;
     dialogNavigator.pop();
     messenger.showSnackBar(
       const SnackBar(content: Text('SOS cancelled.')),
@@ -673,18 +781,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final commsProvider = context.read<CommsProvider>();
     final crisisProvider = context.read<CrisisProvider>();
 
-    final aiStatus = crisisProvider.latestAnalysis?.aiStatus ?? 'local_heuristic_response';
+    final aiStatus =
+        crisisProvider.latestAnalysis?.aiStatus ?? 'local_heuristic_response';
     final aiStatusLabel = aiStatus == 'gemini_success'
-      ? settings.t('home_ai_status_gemini_success')
+        ? settings.t('home_ai_status_gemini_success')
         : aiStatus == 'missing_api_key'
-        ? settings.t('home_ai_status_missing_api_key')
+            ? settings.t('home_ai_status_missing_api_key')
             : aiStatus == 'forced_offline'
-          ? settings.t('home_ai_status_forced_offline')
+                ? settings.t('home_ai_status_forced_offline')
                 : aiStatus == 'gemini_empty_response'
-            ? settings.t('home_ai_status_empty_response')
+                    ? settings.t('home_ai_status_empty_response')
                     : aiStatus == 'gemini_error'
-              ? settings.t('home_ai_status_gemini_error')
-              : settings.t('home_ai_status_local_heuristic');
+                        ? settings.t('home_ai_status_gemini_error')
+                        : settings.t('home_ai_status_local_heuristic');
 
     showDialog<void>(
       context: context,
@@ -719,7 +828,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                settings.t('home_ai_status').replaceAll('{status}', aiStatusLabel),
+                settings
+                    .t('home_ai_status')
+                    .replaceAll('{status}', aiStatusLabel),
                 style: infoTextStyle,
               ),
               const SizedBox(height: 8),
@@ -820,8 +931,9 @@ class _HomeScreenState extends State<HomeScreen> {
       ResponderChatListScreen.open(
         context,
         currentUserId: user.id,
-        currentUserName:
-          context.read<AppSettingsProvider>().localizedDisplayName(user.displayName),
+        currentUserName: context
+            .read<AppSettingsProvider>()
+            .localizedDisplayName(user.displayName),
       );
       return;
     }
@@ -829,8 +941,9 @@ class _HomeScreenState extends State<HomeScreen> {
     VictimChatListScreen.open(
       context,
       currentUserId: user.id,
-        currentUserName:
-          context.read<AppSettingsProvider>().localizedDisplayName(user.displayName),
+      currentUserName: context
+          .read<AppSettingsProvider>()
+          .localizedDisplayName(user.displayName),
     );
   }
 
@@ -840,7 +953,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final sosId = _currentSosRequestId;
 
     if (user == null || sosId == null) {
-      _showSnackBar(context.read<AppSettingsProvider>().t('status_chat_not_ready'));
+      _showSnackBar(
+          context.read<AppSettingsProvider>().t('status_chat_not_ready'));
       return;
     }
 
@@ -849,7 +963,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => GroupChatScreen(
           sosId: sosId,
           currentUserId: user.id,
-            currentUserName: context
+          currentUserName: context
               .read<AppSettingsProvider>()
               .localizedDisplayName(user.displayName),
           currentUserRole: 'victim',
@@ -892,114 +1006,115 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-              // Drag handle
-              Container(
-                width: 40,
-                height: 5,
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(10),
+                // Drag handle
+                Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
-              ),
 
-              // Title
-              Text(
-                settings.t('home_select_language'),
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+                // Title
+                Text(
+                  settings.t('home_select_language'),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
 
-              const SizedBox(height: 4),
+                const SizedBox(height: 4),
 
-              Text(
-                settings.t('home_choose_preferred_language'),
-                style: TextStyle(color: Colors.grey),
-              ),
-
-              const SizedBox(height: 12),
-
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: SwitchListTile.adaptive(
-                  value: settings.showAllLanguages,
-                  onChanged: settings.setShowAllLanguages,
-                  title: Text(settings.t('home_show_all_languages')),
-                  subtitle: Text(settings.t('home_show_all_languages_hint')),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                Text(
+                  settings.t('home_choose_preferred_language'),
+                  style: TextStyle(color: Colors.grey),
                 ),
-              ),
 
-              const SizedBox(height: 8),
+                const SizedBox(height: 12),
 
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: settings.availableLanguageCodes.length,
-                  itemBuilder: (context, index) {
-                    final code = settings.availableLanguageCodes[index];
-                    final isSelected = settings.languageCode == code;
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: SwitchListTile.adaptive(
+                    value: settings.showAllLanguages,
+                    onChanged: settings.setShowAllLanguages,
+                    title: Text(settings.t('home_show_all_languages')),
+                    subtitle: Text(settings.t('home_show_all_languages_hint')),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  ),
+                ),
 
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () {
-                          settings.setLanguage(code);
-                          Navigator.pop(sheetContext);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 14),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? Colors.blue.withValues(alpha: 0.1)
-                                : Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color:
-                                  isSelected ? Colors.blue : Colors.transparent,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              // Language Icon
-                              CircleAvatar(
-                                backgroundColor: Colors.red.shade50,
-                                child: const Icon(Icons.language,
-                                    color: Colors.red),
+                const SizedBox(height: 8),
+
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: settings.availableLanguageCodes.length,
+                    itemBuilder: (context, index) {
+                      final code = settings.availableLanguageCodes[index];
+                      final isSelected = settings.languageCode == code;
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 4),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () {
+                            settings.setLanguage(code);
+                            Navigator.pop(sheetContext);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? Colors.blue.withValues(alpha: 0.1)
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isSelected
+                                    ? Colors.blue
+                                    : Colors.transparent,
                               ),
+                            ),
+                            child: Row(
+                              children: [
+                                // Language Icon
+                                CircleAvatar(
+                                  backgroundColor: Colors.red.shade50,
+                                  child: const Icon(Icons.language,
+                                      color: Colors.red),
+                                ),
 
-                              const SizedBox(width: 12),
+                                const SizedBox(width: 12),
 
-                              // Language Label
-                              Expanded(
-                                child: Text(
-                                  settings.languageLabel(code),
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: isSelected
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
+                                // Language Label
+                                Expanded(
+                                  child: Text(
+                                    settings.languageLabel(code),
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: isSelected
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                    ),
                                   ),
                                 ),
-                              ),
 
-                              // Selected check
-                              if (isSelected)
-                                const Icon(Icons.check_circle,
-                                    color: Colors.red),
-                            ],
+                                // Selected check
+                                if (isSelected)
+                                  const Icon(Icons.check_circle,
+                                      color: Colors.red),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
               ],
             ),
           ),
@@ -1022,10 +1137,10 @@ class _HomeScreenState extends State<HomeScreen> {
       onOpenResponderRequests: _openResponderRequests,
       isResponderAvailable: authProvider.currentUser?.isResponder == true
           ? context
-              .read<ResponderProvider>()
-              .responderForUserId(authProvider.currentUser!.id)
-              ?.isAvailable
-              ?? true
+                  .read<ResponderProvider>()
+                  .responderForUserId(authProvider.currentUser!.id)
+                  ?.isAvailable ??
+              true
           : null,
       onToggleAvailability: authProvider.currentUser?.isResponder == true
           ? (value) async {
@@ -1082,7 +1197,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.accessibility_new, color: Colors.white),
+                            const Icon(Icons.accessibility_new,
+                                color: Colors.white),
                             const SizedBox(width: 10),
                             Text(
                               settings.t('title_accessibility'),
@@ -1124,7 +1240,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           if (mounted) {
                             _showSnackBar(v
                                 ? settings.t('accessibility_flashlight_enabled')
-                                : settings.t('accessibility_flashlight_disabled'));
+                                : settings
+                                    .t('accessibility_flashlight_disabled'));
                           }
                           setModalState(() {});
                         },
@@ -1158,8 +1275,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             }
 
                             if (!granted && mounted) {
-                              _showSnackBar(
-                                  settings.t('notification_permission_not_granted'));
+                              _showSnackBar(settings
+                                  .t('notification_permission_not_granted'));
                             }
                           } else {
                             settings.setNotificationsEnabled(false);
@@ -1185,7 +1302,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 const Icon(Icons.text_fields,
                                     color: Colors.red),
                                 const SizedBox(width: 8),
-                                Expanded(child: Text(settings.t('label_text_size'))),
+                                Expanded(
+                                    child: Text(settings.t('label_text_size'))),
                                 Text(
                                   '${(settings.textScaleFactor * 100).round()}%',
                                   style: const TextStyle(
@@ -1246,12 +1364,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 settings.t('accessibility_announcement_text'),
                               );
                               if (mounted) {
-                                _showSnackBar(settings.t('accessibility_announcement_sent'));
+                                _showSnackBar(settings
+                                    .t('accessibility_announcement_sent'));
                               }
                             },
                             icon: const Icon(Icons.record_voice_over),
-                            label: Text(
-                              context.read<AppSettingsProvider>().t('button_voice_test')),
+                            label: Text(context
+                                .read<AppSettingsProvider>()
+                                .t('button_voice_test')),
                           ),
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
@@ -1261,12 +1381,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             onPressed: () async {
                               await _pulseFlash();
                               if (mounted) {
-                                _showSnackBar(settings.t('flash_test_completed'));
+                                _showSnackBar(
+                                    settings.t('flash_test_completed'));
                               }
                             },
                             icon: const Icon(Icons.flashlight_on),
-                            label: Text(
-                              context.read<AppSettingsProvider>().t('button_flash_test')),
+                            label: Text(context
+                                .read<AppSettingsProvider>()
+                                .t('button_flash_test')),
                           ),
                         ],
                       ),
@@ -1330,7 +1452,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           const Icon(Icons.wifi_tethering, color: Colors.white),
                           const SizedBox(width: 10),
                           Text(
-                            context.read<AppSettingsProvider>().t('comms_simulation_title'),
+                            context
+                                .read<AppSettingsProvider>()
+                                .t('comms_simulation_title'),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 18,
@@ -1362,7 +1486,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
                           // Selected item display
                           selectedItemBuilder: (context) {
-                            final settings = context.read<AppSettingsProvider>();
+                            final settings =
+                                context.read<AppSettingsProvider>();
                             return CommsMode.values.map((mode) {
                               return Row(
                                 children: [
@@ -1378,7 +1503,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
 
                           items: CommsMode.values.map((mode) {
-                            final settings = context.read<AppSettingsProvider>();
+                            final settings =
+                                context.read<AppSettingsProvider>();
                             return DropdownMenuItem<CommsMode>(
                               value: mode,
                               child: Row(
@@ -1403,7 +1529,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     // 🔧 Switch Cards
                     _buildCommsSwitch(
-                      title: context.read<AppSettingsProvider>().t('comms_simulate_tower_failure'),
+                      title: context
+                          .read<AppSettingsProvider>()
+                          .t('comms_simulate_tower_failure'),
                       icon: Icons.signal_cellular_off,
                       value: comms.simulateTowerFailure,
                       onChanged: (v) {
@@ -1413,8 +1541,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
 
                     _buildCommsSwitch(
-                      title: context.read<AppSettingsProvider>().t('comms_device_supports_satellite'),
-                      subtitle: context.read<AppSettingsProvider>().t('comms_simulated_capability'),
+                      title: context
+                          .read<AppSettingsProvider>()
+                          .t('comms_device_supports_satellite'),
+                      subtitle: context
+                          .read<AppSettingsProvider>()
+                          .t('comms_simulated_capability'),
                       icon: Icons.satellite_alt,
                       value: comms.deviceSupportsSatellite,
                       onChanged: (v) {
@@ -1431,7 +1563,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       decoration: BoxDecoration(
                         color: Colors.red.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                        border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.3)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1440,7 +1573,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              context.read<AppSettingsProvider>().t('comms_simulation_info'),
+                              context
+                                  .read<AppSettingsProvider>()
+                                  .t('comms_simulation_info'),
                               style: const TextStyle(fontSize: 13),
                             ),
                           ),
@@ -1841,6 +1976,39 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _handleHomeHeaderMenuSelection(
+      _HomeHeaderMenuOption option) async {
+    final authProvider = context.read<AuthProvider>();
+
+    switch (option) {
+      case _HomeHeaderMenuOption.language:
+        _showLanguagePicker();
+        break;
+      case _HomeHeaderMenuOption.accessibility:
+        _showAccessibilitySheet();
+        break;
+      case _HomeHeaderMenuOption.commsSimulation:
+        _showCommsSimulationSheet();
+        break;
+      case _HomeHeaderMenuOption.viewSosHistory:
+        final currentUser = authProvider.currentUser;
+        if (currentUser != null) {
+          SosHistoryScreen.open(
+            context,
+            currentUserId: currentUser.id,
+            currentUserName: currentUser.displayName,
+          );
+        }
+        break;
+      case _HomeHeaderMenuOption.aboutApp:
+        final uri = Uri.parse('https://github.com/gopikaganesan/rescue-link');
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
@@ -1859,270 +2027,398 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.wifi_tethering),
-          onPressed: _showCommsSimulationSheet,
-          tooltip: settings.t('comms_simulation_title'),
-        ),
         title: Text(settings.t('app_title')),
         centerTitle: true,
         elevation: 0,
         backgroundColor: Colors.red.shade700,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.accessibility_new),
-            onPressed: _showAccessibilitySheet,
-            tooltip: context.read<AppSettingsProvider>().t('title_accessibility'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.language),
-            onPressed: _showLanguagePicker,
-            tooltip: context.read<AppSettingsProvider>().t('home_select_language'),
+          PopupMenuButton<_HomeHeaderMenuOption>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: _handleHomeHeaderMenuSelection,
+            itemBuilder: (_) => <PopupMenuEntry<_HomeHeaderMenuOption>>[
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.language,
+                child: Row(
+                  children: [
+                    const Icon(Icons.language, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('home_select_language')),
+                  ],
+                ),
+              ),
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.accessibility,
+                child: Row(
+                  children: [
+                    const Icon(Icons.accessibility_new, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('title_accessibility')),
+                  ],
+                ),
+              ),
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.commsSimulation,
+                child: Row(
+                  children: [
+                    const Icon(Icons.wifi_tethering, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('comms_simulation_title')),
+                  ],
+                ),
+              ),
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.viewSosHistory,
+                child: Row(
+                  children: [
+                    const Icon(Icons.history, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('button_view_sos_history')),
+                  ],
+                ),
+              ),
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.aboutApp,
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('button_about_app')),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
       body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onHorizontalDragEnd: (details) {
-          if (details.primaryVelocity != null && details.primaryVelocity! < -300) {
-            final auth = context.read<AuthProvider>();
-            if (auth.currentUser?.isResponder == true) {
-              Navigator.of(context).pushReplacement(
-                _noTransitionRoute(const ResponderRequestsScreen()),
-              );
-            } else {
-              _openChats();
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragEnd: (details) {
+            if (details.primaryVelocity != null &&
+                details.primaryVelocity! < -300) {
+              final auth = context.read<AuthProvider>();
+              if (auth.currentUser?.isResponder == true) {
+                Navigator.of(context).pushReplacement(
+                  _noTransitionRoute(const ResponderRequestsScreen()),
+                );
+              } else {
+                _openChats();
+              }
             }
-          }
-        },
-        child: SingleChildScrollView(
-          child: Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: Column(children: [
-                // Top section: Info
-                Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Text(
-                        settings.t('emergency_prompt'),
-                        style: Theme.of(context).textTheme.headlineSmall,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _openResponderAction,
-                          icon: const Icon(Icons.health_and_safety),
-                          label: Text(
-                            authProvider.currentUser?.isResponder == true
-                                ? settings.t('button_responder_dashboard')
-                                : settings.t('become_responder'),
+          },
+          child: SingleChildScrollView(
+              child: Padding(
+                  padding: const EdgeInsets.only(bottom: 20),
+                  child: Column(children: [
+                    // Top section: Info
+                    Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            settings.t('emergency_prompt'),
+                            style: Theme.of(context).textTheme.headlineSmall,
+                            textAlign: TextAlign.center,
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Padding(
-                          padding: const EdgeInsets.all(20.0),
-                          child: Consumer<ResponderProvider>(
-                              builder: (context, responderProvider, _) {
-                            return IntrinsicHeight(
-                                child: Row(children: [
-                              Expanded(
-                                child: _actionCard(
-                                  title: settings.t('total_responders'),
-                                  value: responderProvider.responders.length
-                                      .toString(),
-                                  icon: Icons.people,
-                                ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _openResponderAction,
+                              icon: const Icon(Icons.health_and_safety),
+                              label: Text(
+                                authProvider.currentUser?.isResponder == true
+                                    ? settings.t('button_responder_dashboard')
+                                    : settings.t('become_responder'),
                               ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: _actionCard(
-                                  title: settings.t('nearby_5km'),
-                                  value: responderProvider
-                                      .nearbyResponders.length
-                                      .toString(),
-                                  icon: Icons.location_on,
-                                ),
-                              ),
-                            ]));
-                          })),
-
-                      const SizedBox(height: 12),
-                      const SizedBox(height: 8),
-                      Consumer<AuthProvider>(
-                        builder: (context, authProvider, _) {
-                          return Consumer<ResponderProvider>(
-                            builder: (context, responderProvider, _) {
-                              return SOSButton(
-                                onPressed: _handleSOSPress,
-                                isLoading: _isSosInProgress,
-                                enableHaptics: settings.hapticsEnabled,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Padding(
+                              padding: const EdgeInsets.all(20.0),
+                              child: Consumer<ResponderProvider>(
+                                  builder: (context, responderProvider, _) {
+                                return IntrinsicHeight(
+                                    child: Row(children: [
+                                  Expanded(
+                                    child: _actionCard(
+                                      title: settings.t('total_responders'),
+                                      value: responderProvider.responders.length
+                                          .toString(),
+                                      icon: Icons.people,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: _actionCard(
+                                      title: settings.t('nearby_5km'),
+                                      value: responderProvider
+                                          .nearbyResponders.length
+                                          .toString(),
+                                      icon: Icons.location_on,
+                                    ),
+                                  ),
+                                ]));
+                              })),
+                          const SizedBox(height: 12),
+                          const SizedBox(height: 8),
+                          Consumer<AuthProvider>(
+                            builder: (context, authProvider, _) {
+                              final sosStatus =
+                                  context.watch<SosStatusProvider>();
+                              final activeSosId =
+                                  sosStatus.activeSosId ?? _currentSosRequestId;
+                              final hasActiveSos = activeSosId != null;
+                              return Consumer<ResponderProvider>(
+                                builder: (context, responderProvider, _) {
+                                  final isCancelMode =
+                                      _isSosInProgress || hasActiveSos;
+                                  return Column(
+                                    children: [
+                                      if (hasActiveSos)
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12.0),
+                                          child: Container(
+                                            width: double.infinity,
+                                            decoration: BoxDecoration(
+                                              color: Colors.red.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                              border: Border.all(
+                                                  color: Colors.red.shade200),
+                                            ),
+                                            padding: const EdgeInsets.all(14),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    settings
+                                                        .t('status_sos_active'),
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodyMedium
+                                                        ?.copyWith(
+                                                          color: Colors
+                                                              .red.shade900,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                        ),
+                                                  ),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () =>
+                                                      _cancelActiveSosButton(
+                                                          activeSosId),
+                                                  style: TextButton.styleFrom(
+                                                    foregroundColor:
+                                                        Colors.red.shade900,
+                                                  ),
+                                                  child: Text(settings
+                                                      .t('button_cancel_sos')),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      SOSButton(
+                                        onPressed: isCancelMode
+                                            ? (_isSosInProgress
+                                                ? _cancelPendingSos
+                                                : () => _cancelActiveSosButton(
+                                                    activeSosId))
+                                            : _handleSOSPress,
+                                        isLoading: _isSosInProgress,
+                                        enableHaptics: settings.hapticsEnabled,
+                                        isActive: isCancelMode,
+                                        activeLabel:
+                                            settings.t('button_cancel_sos'),
+                                        activeSubLabel: _isSosInProgress
+                                            ? settings.t(
+                                                'sos_button_cancel_sending_hint')
+                                            : settings
+                                                .t('sos_button_cancel_hint'),
+                                      ),
+                                    ],
+                                  );
+                                },
                               );
                             },
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          IconButton(
-                            icon: Icon(Icons.info_outline,
-                                color: Colors.blue.shade700),
-                            tooltip: 'Info',
-                            onPressed: _showEmergencyInfoBalloon,
                           ),
-                          FilterChip(
-                            selected: _forceCriticalSeverity,
-                            label: Text(context.read<AppSettingsProvider>().t('button_force_critical')),
-                            selectedColor: Colors.red.shade100,
-                            checkmarkColor: Colors.red.shade800,
-                            onSelected: (value) {
-                              setState(() {
-                                _forceCriticalSeverity = value;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _emergencyContextController,
-                        minLines: 1,
-                        maxLines: 3,
-                        cursorColor: Colors.red,
-                        decoration: InputDecoration(
-                          hintText:
-                              settings.t('hint_emergency_details_example'),
-                          filled: true,
-                          fillColor: Colors.red.shade50,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: Colors.red.shade200),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(
-                                color: Colors.red.shade300, width: 1.2),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(
-                                color: Colors.red.shade600, width: 2),
-                          ),
-                          errorBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(color: Colors.red),
-                          ),
-                          label: Row(
-                            mainAxisSize: MainAxisSize.min,
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Icon(Icons.warning_amber_rounded,
-                                  color: Colors.black54, size: 18),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  settings.t('label_emergency_details_optional'),
-                                  style: TextStyle(color: Colors.red.shade700),
-                                ),
+                              IconButton(
+                                icon: Icon(Icons.info_outline,
+                                    color: Colors.blue.shade700),
+                                tooltip: 'Info',
+                                onPressed: _showEmergencyInfoBalloon,
+                              ),
+                              FilterChip(
+                                selected: _forceCriticalSeverity,
+                                label: Text(context
+                                    .read<AppSettingsProvider>()
+                                    .t('button_force_critical')),
+                                selectedColor: Colors.red.shade100,
+                                checkmarkColor: Colors.red.shade800,
+                                onSelected: (value) {
+                                  setState(() {
+                                    _forceCriticalSeverity = value;
+                                  });
+                                },
                               ),
                             ],
                           ),
-                          hintStyle: TextStyle(color: Colors.red.shade300),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                          prefixIcon: IconButton(
-                            onPressed: _pickCameraImage,
-                            icon: const Icon(Icons.camera_alt),
-                            tooltip: settings.t('tooltip_capture_photo'),
-                          ),
-                          suffixIcon: SizedBox(
-                            width: 110,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                IconButton(
-                                  tooltip: _isRecordingClip
-                                      ? settings.t('tooltip_stop_voice_clip')
-                                      : settings.t('tooltip_record_voice_clip'),
-                                  onPressed: _toggleVoiceClipRecording,
-                                  icon: Icon(
-                                    _isRecordingClip
-                                        ? Icons.stop_circle
-                                        : Icons.keyboard_voice_rounded,
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: _emergencyContextController,
+                            minLines: 1,
+                            maxLines: 3,
+                            cursorColor: Colors.red,
+                            decoration: InputDecoration(
+                              hintText:
+                                  settings.t('hint_emergency_details_example'),
+                              filled: true,
+                              fillColor: Colors.red.shade50,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide:
+                                    BorderSide(color: Colors.red.shade200),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide(
+                                    color: Colors.red.shade300, width: 1.2),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide(
+                                    color: Colors.red.shade600, width: 2),
+                              ),
+                              errorBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: const BorderSide(color: Colors.red),
+                              ),
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.warning_amber_rounded,
+                                      color: Colors.black54, size: 18),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      settings.t(
+                                          'label_emergency_details_optional'),
+                                      style:
+                                          TextStyle(color: Colors.red.shade700),
+                                    ),
                                   ),
+                                ],
+                              ),
+                              hintStyle: TextStyle(color: Colors.red.shade300),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              prefixIcon: IconButton(
+                                onPressed: _pickCameraImage,
+                                icon: const Icon(Icons.camera_alt),
+                                tooltip: settings.t('tooltip_capture_photo'),
+                              ),
+                              suffixIcon: SizedBox(
+                                width: 110,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    IconButton(
+                                      tooltip: _isRecordingClip
+                                          ? settings
+                                              .t('tooltip_stop_voice_clip')
+                                          : settings
+                                              .t('tooltip_record_voice_clip'),
+                                      onPressed: _toggleVoiceClipRecording,
+                                      icon: Icon(
+                                        _isRecordingClip
+                                            ? Icons.stop_circle
+                                            : Icons.keyboard_voice_rounded,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: _isTranscribing
+                                          ? settings
+                                              .t('tooltip_stop_voice_to_text')
+                                          : settings.t('tooltip_voice_to_text'),
+                                      onPressed: _speechReady
+                                          ? _toggleVoiceInput
+                                          : null,
+                                      icon: Icon(_isTranscribing
+                                          ? Icons.stop
+                                          : Icons.transcribe),
+                                    ),
+                                  ],
                                 ),
-                                IconButton(
-                                  tooltip: _isTranscribing
-                                      ? settings.t('tooltip_stop_voice_to_text')
-                                      : settings.t('tooltip_voice_to_text'),
-                                  onPressed:
-                                      _speechReady ? _toggleVoiceInput : null,
-                                  icon: Icon(
-                                      _isTranscribing ? Icons.stop : Icons.transcribe),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                      if (_selectedImage != null ||
-                          (_voiceAudioPath != null &&
-                              _voiceAudioPath!.isNotEmpty)) ...[
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: [
-                                if (_selectedImage != null)
-                                  _buildAttachmentCard(
-                                    icon: Icons.image_outlined,
-                                    fileName: _selectedImage!.name.isEmpty
-                                        ? 'photo_attachment.jpg'
-                                        : _selectedImage!.name,
-                                    fileKind: settings.t('attachment_photo'),
-                                    semanticsLabel: settings.t('semantics_view_attached_photo'),
-                                    onOpen: _previewSelectedPhoto,
-                                    onRemove: _removePhotoAttachment,
-                                  ),
-                                if (_selectedImage != null &&
-                                    _voiceAudioPath != null &&
-                                    _voiceAudioPath!.isNotEmpty)
-                                  const SizedBox(width: 8),
-                                if (_voiceAudioPath != null &&
-                                    _voiceAudioPath!.isNotEmpty)
-                                  _buildAttachmentCard(
-                                    icon: Icons.graphic_eq_rounded,
-                                    fileName: 'voice_clip.wav',
-                                    fileKind: settings.t('attachment_voice'),
-                                    semanticsLabel: settings.t('semantics_play_attached_voice_clip'),
-                                    onOpen: _toggleLocalVoicePreview,
-                                    onRemove: _removeVoiceAttachment,
-                                    openIcon: _isPreviewPlaying
-                                        ? Icons.stop
-                                        : Icons.play_arrow,
-                                    statusIcon: _includeVoiceClip
-                                        ? Icons.link
-                                        : Icons.link_off,
-                                    statusColor: _includeVoiceClip
-                                        ? Colors.teal.shade700
-                                        : Colors.grey.shade600,
-                                  ),
-                              ],
+                          if (_selectedImage != null ||
+                              (_voiceAudioPath != null &&
+                                  _voiceAudioPath!.isNotEmpty)) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    if (_selectedImage != null)
+                                      _buildAttachmentCard(
+                                        icon: Icons.image_outlined,
+                                        fileName: _selectedImage!.name.isEmpty
+                                            ? 'photo_attachment.jpg'
+                                            : _selectedImage!.name,
+                                        fileKind:
+                                            settings.t('attachment_photo'),
+                                        semanticsLabel: settings
+                                            .t('semantics_view_attached_photo'),
+                                        onOpen: _previewSelectedPhoto,
+                                        onRemove: _removePhotoAttachment,
+                                      ),
+                                    if (_selectedImage != null &&
+                                        _voiceAudioPath != null &&
+                                        _voiceAudioPath!.isNotEmpty)
+                                      const SizedBox(width: 8),
+                                    if (_voiceAudioPath != null &&
+                                        _voiceAudioPath!.isNotEmpty)
+                                      _buildAttachmentCard(
+                                        icon: Icons.graphic_eq_rounded,
+                                        fileName: 'voice_clip.wav',
+                                        fileKind:
+                                            settings.t('attachment_voice'),
+                                        semanticsLabel: settings.t(
+                                            'semantics_play_attached_voice_clip'),
+                                        onOpen: _toggleLocalVoicePreview,
+                                        onRemove: _removeVoiceAttachment,
+                                        openIcon: _isPreviewPlaying
+                                            ? Icons.stop
+                                            : Icons.play_arrow,
+                                        statusIcon: _includeVoiceClip
+                                            ? Icons.link
+                                            : Icons.link_off,
+                                        statusColor: _includeVoiceClip
+                                            ? Colors.teal.shade700
+                                            : Colors.grey.shade600,
+                                      ),
+                                  ],
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      /*
+                          ],
+                          const SizedBox(height: 12),
+                          /*
                       if (false)
                         Align(
                           alignment: Alignment.centerLeft,
@@ -2136,12 +2432,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),*/
 
-
-                      const SizedBox(height: 12),
-                    ],
-                  ),
-                ),
-              ])))),
+                          const SizedBox(height: 12),
+                        ],
+                      ),
+                    ),
+                  ])))),
       bottomNavigationBar: FixedFooterNavigationBar(
         activeIndex: 0,
         showPeople: authProvider.currentUser?.isResponder == true,
@@ -2257,7 +2552,8 @@ Widget _buildSwitchCard({
     padding: const EdgeInsets.only(bottom: 10),
     child: Container(
       decoration: BoxDecoration(
-        color: value ? Colors.red.withValues(alpha: 0.08) : Colors.grey.shade100,
+        color:
+            value ? Colors.red.withValues(alpha: 0.08) : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: value ? Colors.red : Colors.transparent,
@@ -2286,7 +2582,8 @@ Widget _buildCommsSwitch({
     padding: const EdgeInsets.only(bottom: 10),
     child: Container(
       decoration: BoxDecoration(
-        color: value ? Colors.red.withValues(alpha: 0.08) : Colors.grey.shade100,
+        color:
+            value ? Colors.red.withValues(alpha: 0.08) : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: value ? Colors.red : Colors.transparent,
