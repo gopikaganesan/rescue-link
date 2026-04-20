@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:rescue_link/core/providers/app_settings_provider.dart';
+
 enum CommsMode {
   auto,
   internet,
@@ -49,37 +51,38 @@ class CommsProvider extends ChangeNotifier {
   }
 
   String resolveDeliveryRoute({
+    required AppSettingsProvider settings,
     required bool cloudWriteSucceeded,
     required bool hasNearbyResponders,
   }) {
     switch (_mode) {
       case CommsMode.internet:
-        return 'Internet route';
+        return settings.t('comms_route_internet');
       case CommsMode.meshSimulated:
-        return 'Mesh relay (simulated)';
+        return settings.t('comms_route_mesh_simulated');
       case CommsMode.satelliteSimulated:
-        return 'Satellite uplink (simulated)';
+        return settings.t('comms_route_satellite_simulated');
       case CommsMode.auto:
         if (_simulateTowerFailure || !cloudWriteSucceeded) {
           if (_deviceSupportsSatellite && !hasNearbyResponders) {
-            return 'Satellite uplink (simulated)';
+            return settings.t('comms_route_satellite_simulated');
           }
-          return 'Mesh relay (simulated)';
+          return settings.t('comms_route_mesh_simulated');
         }
-        return 'Internet route';
+        return settings.t('comms_route_internet');
     }
   }
 
-  String modeLabel(CommsMode value) {
+  String modeLabel(CommsMode value, AppSettingsProvider settings) {
     switch (value) {
       case CommsMode.auto:
-        return 'Auto';
+        return settings.t('comms_mode_auto');
       case CommsMode.internet:
-        return 'Internet';
+        return settings.t('comms_mode_internet');
       case CommsMode.meshSimulated:
-        return 'Mesh (Simulated)';
+        return settings.t('comms_mode_mesh_simulated');
       case CommsMode.satelliteSimulated:
-        return 'Satellite (Simulated)';
+        return settings.t('comms_mode_satellite_simulated');
     }
   }
 }

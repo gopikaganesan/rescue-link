@@ -8,9 +8,6 @@ version: 1.0.0+1
 environment:
   sdk: '>=3.1.0 <4.0.0'
 
-# Enable Dart experiments
-dart: '>=3.0.0 <4.0.0'
-
 dependencies:
   flutter:
     sdk: flutter
@@ -44,12 +41,21 @@ dependencies:
   path_provider: ^2.1.5
   record: ^6.1.1
   audioplayers: ^6.1.0
+  flutter_tts: ^4.2.3
+  youtube_player_iframe: ^5.2.1
   http: ^1.2.2
+  image: ^4.2.0
+  intl: ^0.20.2
+  translator: ^1.0.3+1
   
   # Nice UI extras (optional but recommended)
   fluttertoast: ^9.0.0
   haptic_feedback: 0.6.4+3   # for SOS vibration
   animated_bottom_navigation_bar: ^1.4.0
+
+  # SOS Triggers (Home Widget & Deep Linking)
+  home_widget: ^0.7.0
+  app_links: ^6.3.3
 
 dev_dependencies:
   flutter_test:
@@ -59,4 +65,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/   # we'll create this folder later if needed
+    - assets/

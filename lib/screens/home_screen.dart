@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:typed_data';
-import 'package:animated_bottom_navigation_bar/animated_bottom_navigation_bar.dart';
 import 'package:audioplayers/audioplayers.dart';
+import '../widgets/fixed_footer_navigation_bar.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -16,20 +17,31 @@ import '../core/providers/auth_provider.dart';
 import '../core/providers/comms_provider.dart';
 import '../core/providers/crisis_provider.dart';
 import '../core/providers/emergency_request_provider.dart';
+import '../core/models/user_model.dart';
 import '../core/providers/location_provider.dart';
+import '../core/providers/sos_status_provider.dart';
 import '../core/providers/responder_provider.dart';
 import '../core/services/notification_service.dart';
-import '../core/services/media_upload_service.dart';
 import '../core/services/responder_matching_service.dart';
-import '../core/services/transcription_service.dart';
-import '../core/models/responder_model.dart';
+import '../core/services/sos_service.dart';
 import 'auth_screen.dart';
+import 'group_chat_screen.dart';
+import 'sos_history_screen.dart';
+import 'victim_chat_list_screen.dart';
+import 'responder_chat_list_screen.dart';
 import 'responder_registration_screen.dart';
 import 'responder_requests_screen.dart';
 import 'map_screen.dart';
-import 'responder_profile_screen.dart';
+import '../widgets/account_sheet.dart';
 import '../widgets/sos_button.dart';
-import 'dart:ui';	 
+
+enum _HomeHeaderMenuOption {
+  language,
+  accessibility,
+  commsSimulation,
+  viewSosHistory,
+  aboutApp,
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -41,16 +53,25 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _isSosInProgress = false;
   Timer? _responderPollingTimer;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _openChatHeadsSub;
+  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+      _openChatMessageSubs =
+      <String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>{};
+  final Map<String, bool> _chatNotificationPreferenceBySosId = <String, bool>{};
+  final Set<String> _primedChatSosIds = <String>{};
+  final Map<String, String> _lastSeenChatMessageIdBySosId = <String, String>{};
+  String? _chatWatcherUserId;
   final Set<String> _notifiedRequestIds = <String>{};
-  String _lastDeliveryRoute = 'Internet route';
+  String _lastDeliveryRoute = '';
   String? _currentSosRequestId; // Track current SOS for cancellation
-  int _bottomNavIndex = 0;
+  bool _isSosDialogVisible = false;
+  bool _isSosCancelRequested = false;
+  SosCancellationToken? _sosCancellationToken;
   final ImagePicker _imagePicker = ImagePicker();
   final SpeechToText _speechToText = SpeechToText();
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _voicePreviewPlayer = AudioPlayer();
-  final TranscriptionService _transcriptionService = TranscriptionService();
-  final MediaUploadService _mediaUploadService = MediaUploadService.fromEnvironment();
+  final FlutterTts _flutterTts = FlutterTts();
   StreamSubscription<void>? _voicePreviewCompleteSub;
   bool _speechReady = false;
   bool _isTranscribing = false;
@@ -58,15 +79,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isPreviewPlaying = false;
   bool _includeVoiceClip = false;
   bool _forceCriticalSeverity = false;
-  String _transcriptionProvider = 'On-device speech';
-  double? _transcriptionConfidence;
-  final bool _cloudTranscriptionEnabled =
-      const String.fromEnvironment('USE_CLOUD_TRANSCRIPTION', defaultValue: 'false') ==
-          'true';
   XFile? _selectedImage;
   String? _voiceTranscript;
   String? _voiceAudioPath;
-  String? _attachmentType;
 
   @override
   void initState() {
@@ -75,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _initializeScreen();
     });
     _initializeSpeech();
+    _configureVoiceTestTts();
     _voicePreviewCompleteSub = _voicePreviewPlayer.onPlayerComplete.listen((_) {
       if (!mounted) {
         return;
@@ -82,6 +98,11 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isPreviewPlaying = false;
       });
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final sosStatus = context.read<SosStatusProvider>();
+      sosStatus.addListener(_onSosStatusChanged);
+      _onSosStatusChanged();
     });
   }
 
@@ -97,6 +118,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await emergencyProvider.retryPendingSync();
     await _syncPushProfile();
     _startResponderAlertPolling();
+    _startOpenAppChatNotificationWatchers();
   }
 
   Future<void> _initializeSpeech() async {
@@ -126,6 +148,27 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _configureVoiceTestTts() async {
+    try {
+      await _flutterTts.setSpeechRate(0.5);
+      await _flutterTts.setPitch(1.0);
+      await _flutterTts.setVolume(1.0);
+      await _flutterTts.setLanguage('en-US');
+    } catch (_) {
+      // Ignore if TTS setup is not available.
+    }
+  }
+
+  Future<void> _runVoiceTest(String message) async {
+    await _flutterTts.stop();
+    _announce(message);
+    try {
+      await _flutterTts.speak(message);
+    } catch (_) {
+      // Silent fallback if TTS is unavailable.
+    }
+  }
+
   Future<void> _syncPushProfile() async {
     final auth = context.read<AuthProvider>();
     final responders = context.read<ResponderProvider>();
@@ -134,7 +177,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final myResponder = responders.responders.where((r) => r.userId == user.id).toList();
+    final myResponder =
+        responders.responders.where((r) => r.userId == user.id).toList();
     final profile = myResponder.isEmpty ? null : myResponder.first;
 
     await NotificationService.syncDeviceProfile(
@@ -155,6 +199,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkResponderAlerts() async {
     final auth = context.read<AuthProvider>();
+    final settings = context.read<AppSettingsProvider>();
+    if (!settings.notificationsEnabled) {
+      return;
+    }
+
     final me = auth.currentUser;
     if (me == null || !me.isResponder) {
       return;
@@ -163,6 +212,20 @@ class _HomeScreenState extends State<HomeScreen> {
     final responders = context.read<ResponderProvider>();
     final requests = context.read<EmergencyRequestProvider>();
 
+    await _checkResponderAlertsWithProviders(
+      me: me,
+      settings: settings,
+      responders: responders,
+      requests: requests,
+    );
+  }
+
+  Future<void> _checkResponderAlertsWithProviders({
+    required UserModel me,
+    required AppSettingsProvider settings,
+    required ResponderProvider responders,
+    required EmergencyRequestProvider requests,
+  }) async {
     await responders.fetchResponders();
     await requests.fetchOpenRequests();
 
@@ -184,18 +247,154 @@ class _HomeScreenState extends State<HomeScreen> {
         continue;
       }
 
-      final radius = ResponderMatchingService.radiusKmForSeverity(request.severity);
-      final distance = responder.distanceToLocation(request.latitude, request.longitude);
+      final radius =
+          ResponderMatchingService.radiusKmForSeverity(request.severity);
+      final distance =
+          responder.distanceToLocation(request.latitude, request.longitude);
       if (distance > radius) {
         continue;
       }
 
+      final title = settings
+          .t('notification_new_nearby_sos_title')
+          .replaceAll('{severity}', request.severity.toUpperCase());
+      final body = settings
+          .t('notification_new_nearby_sos_body')
+          .replaceAll('{category}', settings.localizedCrisisCategory(request.category))
+          .replaceAll('{skill}', request.recommendedSkill)
+          .replaceAll('{distance}', distance.toStringAsFixed(1));
+
       _notifiedRequestIds.add(request.id);
-      await NotificationService.showSosAlert(
-        title: 'New Nearby SOS (${request.severity.toUpperCase()})',
-        body: '${request.category} • ${request.recommendedSkill} • ${distance.toStringAsFixed(1)} km',
+      await NotificationService.showResponderSosAlert(
+        requestId: request.id,
+        title: title,
+        body: body,
       );
     }
+  }
+
+  void _startOpenAppChatNotificationWatchers() {
+    final auth = context.read<AuthProvider>();
+    final settings = context.read<AppSettingsProvider>();
+    final user = auth.currentUser;
+    if (user == null || !settings.notificationsEnabled) {
+      _stopOpenAppChatNotificationWatchers();
+      return;
+    }
+
+    if (_chatWatcherUserId == user.id && _openChatHeadsSub != null) {
+      return;
+    }
+
+    _stopOpenAppChatNotificationWatchers();
+    _chatWatcherUserId = user.id;
+
+    _openChatHeadsSub = FirebaseFirestore.instance
+        .collection('chats')
+        .where('participantUids', arrayContains: user.id)
+        .where('status', isEqualTo: 'active')
+        .snapshots()
+        .listen((snapshot) {
+      final activeChatIds = snapshot.docs.map((doc) => doc.id).toSet();
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final preferences = (data['notificationPreferences'] as Map?) ??
+            const <String, dynamic>{};
+        _chatNotificationPreferenceBySosId[doc.id] =
+            preferences[user.id] != false;
+
+        if (!_openChatMessageSubs.containsKey(doc.id)) {
+          _watchLatestChatMessage(doc.id, user.id);
+        }
+      }
+
+      final staleIds = _openChatMessageSubs.keys
+          .where((id) => !activeChatIds.contains(id))
+          .toList();
+      for (final staleId in staleIds) {
+        _openChatMessageSubs.remove(staleId)?.cancel();
+        _chatNotificationPreferenceBySosId.remove(staleId);
+        _primedChatSosIds.remove(staleId);
+        _lastSeenChatMessageIdBySosId.remove(staleId);
+      }
+    });
+  }
+
+  void _watchLatestChatMessage(String sosId, String currentUserId) {
+    final sub = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(sosId)
+        .collection('messages')
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen((snapshot) async {
+      if (!mounted || snapshot.docs.isEmpty) {
+        return;
+      }
+
+      final latest = snapshot.docs.first;
+      final latestId = latest.id;
+
+      if (!_primedChatSosIds.contains(sosId)) {
+        _primedChatSosIds.add(sosId);
+        _lastSeenChatMessageIdBySosId[sosId] = latestId;
+        return;
+      }
+
+      if (_lastSeenChatMessageIdBySosId[sosId] == latestId) {
+        return;
+      }
+      _lastSeenChatMessageIdBySosId[sosId] = latestId;
+
+      final isEnabled = _chatNotificationPreferenceBySosId[sosId] != false;
+      if (!isEnabled) {
+        return;
+      }
+
+      final data = latest.data();
+      final senderUid = (data['senderUid'] as String?)?.trim() ?? '';
+      final isAi = data['isAi'] == true || senderUid == 'rescuelink_ai';
+      final isSystem =
+          data['isSystem'] == true || (data['type'] as String?) == 'system';
+      if (senderUid.isEmpty || senderUid == currentUserId || isAi || isSystem) {
+        return;
+      }
+
+      final senderName =
+          ((data['senderName'] as String?)?.trim().isNotEmpty ?? false)
+              ? context
+                  .read<AppSettingsProvider>()
+                  .localizedDisplayName((data['senderName'] as String).trim())
+              : context.read<AppSettingsProvider>().t('name_participant');
+      final text = (data['text'] as String?)?.trim() ?? '';
+      final preview = text.isEmpty
+          ? 'Sent an attachment'
+          : (text.length > 120 ? '${text.substring(0, 117)}...' : text);
+
+      await NotificationService.showChatMessageAlert(
+        title: 'New message in group chat',
+        body: '$senderName: $preview',
+        chatSosId: sosId,
+      );
+    });
+
+    _openChatMessageSubs[sosId] = sub;
+  }
+
+  void _stopOpenAppChatNotificationWatchers() {
+    _openChatHeadsSub?.cancel();
+    _openChatHeadsSub = null;
+
+    for (final sub in _openChatMessageSubs.values) {
+      sub.cancel();
+    }
+    _openChatMessageSubs.clear();
+    _chatNotificationPreferenceBySosId.clear();
+    _primedChatSosIds.clear();
+    _lastSeenChatMessageIdBySosId.clear();
+    _chatWatcherUserId = null;
   }
 
   /// Handle SOS button press
@@ -204,210 +403,66 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    _sosCancellationToken = SosCancellationToken();
+    _isSosCancelRequested = false;
     setState(() {
       _isSosInProgress = true;
     });
 
     try {
+      final sosService = SosService();
+      final commsProvider = context.read<CommsProvider>();
+      final responderProvider = context.read<ResponderProvider>();
+      final appSettings = context.read<AppSettingsProvider>();
       final authProvider = context.read<AuthProvider>();
       final crisisProvider = context.read<CrisisProvider>();
       final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
       final locationProvider = context.read<LocationProvider>();
-      final responderProvider = context.read<ResponderProvider>();
-      final settings = context.read<AppSettingsProvider>();
-      final commsProvider = context.read<CommsProvider>();
 
-      if (settings.sosFlashEnabled) {
-        await _pulseFlash();
-      }
-
-      if (!locationProvider.hasLocation) {
-        _showSnackBar('Requesting your location...');
-        await locationProvider.refreshLocationStatus(fetchLocation: true);
-      }
-
-      if (!locationProvider.hasLocation || authProvider.currentUser == null) {
-        _showSnackBar('Unable to determine location. Please try again.');
-        return;
-      }
-
-      await responderProvider.fetchResponders();
-
-      // Update user location
-      authProvider.updateUserLocation(
-        locationProvider.latitude!,
-        locationProvider.longitude!,
+      // Execute the SOS flow via the service
+      final requestId = await sosService.triggerSos(
+        SosTriggerContext(
+          authProvider: authProvider,
+          crisisProvider: crisisProvider,
+          emergencyRequestProvider: emergencyRequestProvider,
+          locationProvider: locationProvider,
+          responderProvider: responderProvider,
+          settings: appSettings,
+          commsProvider: commsProvider,
+          customMessage: _emergencyContextController.text.trim(),
+          imageFile: _selectedImage,
+          voiceAudioPath: _voiceAudioPath,
+          forceCritical: _forceCriticalSeverity,
+          cancelToken: _sosCancellationToken,
+        ),
       );
 
-      final typedMessage = _emergencyContextController.text.trim();
-      String transcript = _voiceTranscript?.trim() ?? '';
+      if (!mounted) return;
 
-      final baseMessageParts = <String>[];
-      if (typedMessage.isNotEmpty) {
-        baseMessageParts.add(typedMessage);
-      }
-      if (transcript.isNotEmpty && transcript != typedMessage) {
-        baseMessageParts.add('Voice note: $transcript');
-      }
+      if (requestId != null) {
+        _currentSosRequestId = requestId;
+        context.read<SosStatusProvider>().setActiveSos(requestId);
 
-      final aiMessageParts = List<String>.from(baseMessageParts);
-      if (_selectedImage != null) {
-        aiMessageParts.add('Photo evidence selected');
-      }
-
-      final aiMessage = aiMessageParts.isEmpty
-          ? 'Potential emergency needs urgent support.'
-          : aiMessageParts.join(' ');
-
-      if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty) {
-        final currentWordCount = transcript
-            .split(RegExp(r'\s+'))
-            .where((word) => word.trim().isNotEmpty)
-            .length;
-        final shouldUseCloudAssist = currentWordCount < 3;
-        if (shouldUseCloudAssist) {
-          final audioBytes = await XFile(_voiceAudioPath!).readAsBytes();
-          final cloudResult = await _transcriptionService.transcribeWithCloud(
-            audioBytes: audioBytes,
-            languageCode: _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
-            alternativeLanguageCodes: _speechAlternatives(
-              _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
-            ),
-          );
-          if (cloudResult != null && cloudResult.transcript.trim().isNotEmpty) {
-            transcript = cloudResult.transcript.trim();
-            _voiceTranscript = transcript;
-            _transcriptionProvider = cloudResult.provider;
-            _transcriptionConfidence = cloudResult.confidence;
-            if (_emergencyContextController.text.trim().isEmpty) {
-              _emergencyContextController.text = transcript;
-              _emergencyContextController.selection = TextSelection.fromPosition(
-                TextPosition(offset: _emergencyContextController.text.length),
-              );
-            }
-          }
-        }
-      }
-
-      final aiInput =
-          'SOS triggered by ${authProvider.currentUser!.displayName} near '
-          '${locationProvider.latitude!.toStringAsFixed(4)}, '
-          '${locationProvider.longitude!.toStringAsFixed(4)}. '
-		  '${_emergencyContextController.text.trim().isEmpty ? 'Potential emergency needs urgent support.' : _emergencyContextController.text.trim()}'
-          'Human report: $aiMessage';
-
-      Uint8List? imageBytesForAi;
-      String? imageMimeTypeForAi;
-      if (_selectedImage != null) {
-        try {
-          imageBytesForAi = await _selectedImage!.readAsBytes();
-          imageMimeTypeForAi = _contentTypeForName(_selectedImage!.name);
-        } catch (_) {
-          imageBytesForAi = null;
-          imageMimeTypeForAi = null;
-        }
-      }
-
-      await crisisProvider.classifyCrisis(
-        aiInput,
-        availableSkills: responderProvider.responders
-            .map((responder) => responder.skillsArea)
-            .toSet()
-            .toList(),
-        forceOffline: commsProvider.forceOfflineAi,
-        imageBytes: imageBytesForAi,
-        imageMimeType: imageMimeTypeForAi,
-      );
-
-      String? attachmentUrl;
-      try {
-        attachmentUrl = await _uploadAttachmentIfNeeded(authProvider.currentUser!.id);
-      } catch (e) {
-        attachmentUrl = null;
-        _showSnackBar('Photo upload failed: ${e.toString()}');
-      }
-      _attachmentType = attachmentUrl != null ? 'image' : null;
-
-      String? voiceAudioUrl;
-      if (_includeVoiceClip) {
-        try {
-          voiceAudioUrl = await _uploadVoiceAudioIfNeeded(authProvider.currentUser!.id);
-        } catch (e) {
-          voiceAudioUrl = null;
-          _showSnackBar('Audio attach failed: ${e.toString()}');
-        }
-      }
-
-      final originalMessageParts = List<String>.from(baseMessageParts);
-      if (attachmentUrl != null) {
-        originalMessageParts.add('Photo attached');
-      }
-      if (voiceAudioUrl != null) {
-        originalMessageParts.add('Voice clip attached');
-      }
-      final originalMessage = originalMessageParts.isEmpty
-          ? 'Potential emergency needs urgent support.'
-          : originalMessageParts.join(' ');
-
-      // Find nearby responders within 5km
-      responderProvider.findNearbyResponders(
-        locationProvider.latitude!,
-        locationProvider.longitude!,
-        5.0,
-        requiredSkill: crisisProvider.latestAnalysis?.recommendedSkill,
-      );
-
-      final analysis = crisisProvider.latestAnalysis;
-        final finalSeverity = _forceCriticalSeverity
-          ? 'critical'
-          : (analysis?.severity ?? 'medium');
-      final requestId = await emergencyRequestProvider.createRequest(
-        requesterUserId: authProvider.currentUser!.id,
-        requesterName: authProvider.currentUser!.displayName,
-        latitude: locationProvider.latitude!,
-        longitude: locationProvider.longitude!,
-        category: analysis?.category ?? 'General Emergency',
-        severity: finalSeverity,
-        originalMessage: originalMessage,
-        voiceTranscript: transcript.isEmpty ? null : transcript,
-        voiceAudioUrl: voiceAudioUrl,
-        voiceAudioType: voiceAudioUrl != null ? 'audio/wav' : null,
-        attachmentUrl: attachmentUrl,
-        attachmentType: _attachmentType,
-        summary: analysis?.summary ?? 'SOS triggered by user',
-        recommendedSkill: analysis?.recommendedSkill ?? 'General Support',
-        suggestedActions: analysis?.suggestedActions ?? const <String>[],
-        aiConfidence: analysis?.confidence,
-        humanReviewRecommended: analysis?.humanReviewRecommended ?? false,
-        forcedCriticalByUser: _forceCriticalSeverity,
-      );
-
-      _currentSosRequestId = requestId;
-
-      final cloudWriteSucceeded = requestId != null;
-      _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
-        cloudWriteSucceeded: cloudWriteSucceeded,
-        hasNearbyResponders: responderProvider.nearbyResponders.isNotEmpty,
-      );
-
-      if (responderProvider.error != null) {
-        _showSnackBar(responderProvider.error!);
-      }
-      if (emergencyRequestProvider.error != null) {
-        _showSnackBar(emergencyRequestProvider.error!);
-      }
-
-      if (settings.notificationsEnabled) {
-        await NotificationService.showSosAlert(
-          title: 'SOS Triggered',
-          body:
-              'Alert sent near ${locationProvider.latitude!.toStringAsFixed(3)}, ${locationProvider.longitude!.toStringAsFixed(3)}',
+        // Track the route (for UI feedback)
+        _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
+          settings: appSettings,
+          cloudWriteSucceeded: true,
+          hasNearbyResponders: responderProvider.nearbyResponders.isNotEmpty,
         );
-      }
 
-      _showSOSConfirmation();
-    } catch (_) {
-      _showSnackBar('SOS could not complete. Please try again.');
+        _showSOSConfirmation();
+      } else if (_isSosCancelRequested) {
+        _showSnackBar(appSettings.t('snackbar_sos_send_cancelled'));
+      } else {
+        _showSnackBar(appSettings.t('snackbar_sos_incomplete'));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar(
+        context.read<AppSettingsProvider>()
+            .t('snackbar_sos_error')
+            .replaceAll('{error}', e.toString()),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -415,6 +470,66 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     }
+  }
+
+  // Note: The previous logic (lines 354-574) is now encapsulated in SosService.
+
+  Future<void> _cancelActiveSosButton(String? requestId) async {
+    if (requestId == null) {
+      return;
+    }
+
+    final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final settings = context.read<AppSettingsProvider>();
+
+    final cancelled = await emergencyRequestProvider.cancelRequest(requestId);
+    if (!mounted) {
+      return;
+    }
+
+    if (cancelled) {
+      context.read<SosStatusProvider>().clearActiveSos();
+      setState(() {
+        _currentSosRequestId = null;
+      });
+      messenger.showSnackBar(
+        SnackBar(content: Text(settings.t('snackbar_cancel_sos_successful'))),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(content: Text(settings.t('snackbar_cancel_sos_failed'))),
+      );
+    }
+  }
+
+  void _onSosStatusChanged() {
+    final sosStatus = context.read<SosStatusProvider>();
+    if (sosStatus.hasActiveSos && !_isSosDialogVisible && mounted) {
+      _currentSosRequestId = sosStatus.activeSosId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        if (!_isSosDialogVisible) {
+          _showSOSConfirmation();
+        }
+      });
+    }
+  }
+
+  Future<void> _cancelPendingSos() async {
+    if (!_isSosInProgress) {
+      return;
+    }
+
+    _sosCancellationToken?.cancel();
+    _isSosCancelRequested = true;
+    setState(() {
+      _isSosInProgress = false;
+    });
+    final settings = context.read<AppSettingsProvider>();
+    _showSnackBar(settings.t('snackbar_sos_send_cancelled'));
   }
 
   Future<void> _pulseFlash() async {
@@ -429,15 +544,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Show SOS confirmation dialog
   void _showSOSConfirmation() {
+    final settings = context.read<AppSettingsProvider>();
     final crisisProvider = context.read<CrisisProvider>();
-    final locationProvider =
-        context.read<LocationProvider>();
-    final responderProvider =
-        context.read<ResponderProvider>();
+    final locationProvider = context.read<LocationProvider>();
+    final responderProvider = context.read<ResponderProvider>();
     final analysis = crisisProvider.latestAnalysis;
-    final emergencyRequestProvider =
-        context.read<EmergencyRequestProvider>();
+    final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
+    final messenger = ScaffoldMessenger.of(context);
 
+    _isSosDialogVisible = true;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -447,7 +562,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Icon(Icons.check_circle, color: Colors.green, size: 28),
             const SizedBox(width: 8),
-            const Expanded(child: Text('✓ SOS Received')),
+            Expanded(child: Text(settings.t('status_sos_received'))),
           ],
         ),
         content: SingleChildScrollView(
@@ -490,7 +605,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8.0),
                   child: Text(
-                    'ℹ️ No nearby responders yet. Use emergency call/SMS as secondary backup.',
+                    'ℹ️ ${settings.t('no_nearby_responders_hint')}',
                     style: Theme.of(context)
                         .textTheme
                         .bodyMedium
@@ -500,30 +615,30 @@ class _HomeScreenState extends State<HomeScreen> {
               if (analysis != null) ...[
                 const SizedBox(height: 16),
                 Text(
-                  'Analysis Results',
+                  settings.t('analysis_results'),
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Category: ${analysis.category}',
+                  '${settings.t('category_label')}: ${settings.localizedCrisisCategory(analysis.category)}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 Text(
-                  'Severity: ${analysis.severity}',
+                  '${settings.t('severity_label')}: ${analysis.severity}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 if (_forceCriticalSeverity)
                   Text(
-                    'Manual override: CRITICAL',
+                    settings.t('manual_override_critical'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.red.shade800,
                           fontWeight: FontWeight.w700,
                         ),
                   ),
                 Text(
-                  'Skill Match: ${analysis.recommendedSkill}',
+                  '${settings.t('skill_match')}: ${settings.localizedSkill(analysis.recommendedSkill)}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 if (analysis.confidence > 0)
@@ -533,7 +648,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 if (analysis.humanReviewRecommended)
                   Text(
-                    'Human review recommended',
+                    settings.t('human_review_recommended'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.orange.shade800,
                           fontWeight: FontWeight.w600,
@@ -542,7 +657,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (analysis.suggestedActions.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'Recommended Actions:',
+                    settings.t('recommended_actions'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -559,7 +674,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
                     child: Text(
-                      '🔌 Offline Mode (AI Fallback Active)',
+                      '🔌 ${settings.t('offline_mode_active')}',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -568,33 +683,32 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
               ],
               const SizedBox(height: 8),
-              Text(
-                'Route: $_lastDeliveryRoute',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey[600],
-                    ),
-              ),
+              if (_lastDeliveryRoute.isNotEmpty)
+                Text(
+                  '${settings.t('label_route')}: $_lastDeliveryRoute',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey[600],
+                      ),
+                ),
             ],
           ),
         ),
         actions: [
           // Cancel SOS - prominent red button
           ElevatedButton.icon(
-            onPressed: () async {
-              if (_currentSosRequestId != null) {
-                await emergencyRequestProvider
-                    .cancelRequest(_currentSosRequestId!);
-                _currentSosRequestId = null;
-              }
-              Navigator.pop(dialogContext);
-              _showSnackBar('SOS cancelled.');
-            },
+            onPressed: () => _cancelCurrentSosRequest(
+              _currentSosRequestId,
+              dialogContext,
+              emergencyRequestProvider,
+              messenger,
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red.shade600,
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.close),
-            label: const Text('Cancel SOS'),
+            label: Text(
+                context.read<AppSettingsProvider>().t('button_cancel_sos')),
           ),
           const SizedBox(width: 8),
           // View Map button
@@ -608,8 +722,25 @@ class _HomeScreenState extends State<HomeScreen> {
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.map),
-            label: const Text('View Map'),
+            label:
+                Text(context.read<AppSettingsProvider>().t('button_view_map')),
           ),
+          if (_currentSosRequestId != null) ...[
+            const SizedBox(width: 8),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _openCurrentSosChat();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green.shade700,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: Text(
+                  context.read<AppSettingsProvider>().t('button_open_chat')),
+            ),
+          ],
           if (responderProvider.nearbyResponders.isEmpty) ...[
             const SizedBox(width: 8),
             // Call Emergency button
@@ -623,14 +754,150 @@ class _HomeScreenState extends State<HomeScreen> {
                 foregroundColor: Colors.white,
               ),
               icon: const Icon(Icons.call),
-              label: const Text('Call 112'),
+              label: Text(context
+                  .read<AppSettingsProvider>()
+                  .t('button_call_emergency')),
             ),
           ],
         ],
       ),
-    );
+    ).then((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isSosDialogVisible = false;
+      });
+    });
 
-    _announce('SOS activated. Nearby responders have been notified.');
+    _announce(context.read<AppSettingsProvider>().t('status_sos_activated'));
+  }
+
+  Future<void> _cancelCurrentSosRequest(
+    String? requestId,
+    BuildContext dialogContext,
+    EmergencyRequestProvider emergencyRequestProvider,
+    ScaffoldMessengerState messenger,
+  ) async {
+    if (requestId == null) {
+      return;
+    }
+
+    final dialogNavigator = Navigator.of(dialogContext);
+    await emergencyRequestProvider.cancelRequest(requestId);
+    if (!mounted) {
+      return;
+    }
+
+    context.read<SosStatusProvider>().clearActiveSos();
+    _currentSosRequestId = null;
+    dialogNavigator.pop();
+    messenger.showSnackBar(
+      SnackBar(content: Text(context.read<AppSettingsProvider>().t('snackbar_sos_cancelled'))),
+    );
+  }
+
+  void _showEmergencyInfoBalloon() {
+    final settings = context.read<AppSettingsProvider>();
+    final commsProvider = context.read<CommsProvider>();
+    final crisisProvider = context.read<CrisisProvider>();
+
+    final aiStatus =
+        crisisProvider.latestAnalysis?.aiStatus ?? 'local_heuristic_response';
+    final aiStatusLabel = aiStatus == 'gemini_success'
+        ? settings.t('home_ai_status_gemini_success')
+        : aiStatus == 'missing_api_key'
+            ? settings.t('home_ai_status_missing_api_key')
+            : aiStatus == 'forced_offline'
+                ? settings.t('home_ai_status_forced_offline')
+                : aiStatus == 'gemini_empty_response'
+                    ? settings.t('home_ai_status_empty_response')
+                    : aiStatus == 'gemini_error'
+                        ? settings.t('home_ai_status_gemini_error')
+                        : settings.t('home_ai_status_local_heuristic');
+
+    final String voiceStatusKey = _speechReady
+        ? 'home_emergency_info_voice_ready'
+        : 'home_emergency_info_voice_unavailable';
+    final String fallbackStatusKey = commsProvider.forceOfflineAi
+        ? 'home_emergency_info_fallback_active'
+        : 'button_powered_by_gemini';
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        final infoTextStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Colors.blueGrey.shade800,
+              fontSize: 14,
+            );
+
+        return AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.info_outline, color: Colors.blue),
+              const SizedBox(width: 8),
+              Expanded(child: Text(settings.t('home_emergency_info_title'))),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildStatusRow(
+                icon: Icons.mic,
+                text: settings.t(voiceStatusKey),
+                style: infoTextStyle,
+              ),
+              const SizedBox(height: 10),
+              _buildStatusRow(
+                icon: Icons.smart_toy,
+                text: settings
+                    .t('home_ai_status')
+                    .replaceAll('{status}', aiStatusLabel),
+                style: infoTextStyle,
+              ),
+              const SizedBox(height: 10),
+              _buildStatusRow(
+                icon: Icons.wifi_off,
+                text: settings.t(fallbackStatusKey),
+                style: infoTextStyle,
+              ),
+              const SizedBox(height: 10),
+              _buildStatusRow(
+                icon: Icons.accessibility_new,
+                text: settings.t('home_emergency_info_accessibility_transcription'),
+                style: infoTextStyle,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatusRow({
+    required IconData icon,
+    required String text,
+    required TextStyle? style,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: Colors.blue.shade700),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: style,
+          ),
+        ),
+      ],
+    );
   }
 
   /// Show snackbar message
@@ -645,7 +912,55 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _announce(String message) {
-    SemanticsService.announce(message, TextDirection.ltr);
+    final view = View.of(context);
+    SemanticsService.sendAnnouncement(view, message, TextDirection.ltr);
+  }
+
+  void _showAboutAppDialog() {
+    final settings = context.read<AppSettingsProvider>();
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(settings.t('home_about_app_title')),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(settings.t('home_about_app_description')),
+                const SizedBox(height: 14),
+                Text('• ${settings.t('home_about_app_feature_sos')}'),
+                const SizedBox(height: 6),
+                Text('• ${settings.t('home_about_app_feature_ai')}'),
+                const SizedBox(height: 6),
+                Text('• ${settings.t('home_about_app_feature_accessibility')}'),
+                const SizedBox(height: 6),
+                Text('• ${settings.t('home_about_app_feature_resilience')}'),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(settings.t('button_close')),
+            ),
+            TextButton(
+              onPressed: () async {
+                final uri = Uri.parse('https://github.com/gopikaganesan/rescue-link');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                } else if (mounted) {
+                  _showSnackBar(settings.t('home_about_app_github_failed'));
+                }
+              },
+              child: Text(settings.t('home_about_app_github')),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _openResponderRegistration() {
@@ -681,22 +996,62 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openResponderProfile(ResponderModel responder) {
-    final locationProvider = context.read<LocationProvider>();
+  void _openChats() {
+    final auth = context.read<AuthProvider>();
+    final user = auth.currentUser;
+    if (user == null) {
+      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_sign_in_to_view_chats'));
+      return;
+    }
+
+    if (user.isResponder) {
+      ResponderChatListScreen.open(
+        context,
+        currentUserId: user.id,
+        currentUserName: context
+            .read<AppSettingsProvider>()
+            .localizedDisplayName(user.displayName),
+      );
+      return;
+    }
+
+    VictimChatListScreen.open(
+      context,
+      currentUserId: user.id,
+      currentUserName: context
+          .read<AppSettingsProvider>()
+          .localizedDisplayName(user.displayName),
+    );
+  }
+
+  void _openCurrentSosChat() {
+    final authProvider = context.read<AuthProvider>();
+    final user = authProvider.currentUser;
+    final sosId = _currentSosRequestId;
+
+    if (user == null || sosId == null) {
+      _showSnackBar(
+          context.read<AppSettingsProvider>().t('status_chat_not_ready'));
+      return;
+    }
+
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ResponderProfileScreen(
-          responder: responder,
-          viewerLatitude: locationProvider.latitude,
-          viewerLongitude: locationProvider.longitude,
-          isCurrentUserProfile: true,
+        builder: (_) => GroupChatScreen(
+          sosId: sosId,
+          currentUserId: user.id,
+          currentUserName: context
+              .read<AppSettingsProvider>()
+              .localizedDisplayName(user.displayName),
+          currentUserRole: 'victim',
+          enableResponderJoinGate: false,
         ),
       ),
     );
   }
 
-  void _openAuthScreen() {
-    Navigator.of(context).push(
+  Future<void> _openAuthScreen() async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => const AuthScreen(showGuestButton: false),
       ),
@@ -706,341 +1061,468 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _logoutRegisteredUser() async {
     await context.read<AuthProvider>().logout();
     if (mounted) {
-      _showSnackBar('Signed out successfully.');
+      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_signed_out'));
     }
   }
 
-void _showLanguagePicker() {
-  final settings = context.read<AppSettingsProvider>();
-
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) {
-      return Container(
-        padding: const EdgeInsets.only(top: 12, bottom: 20),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(24),						  
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Drag handle
-            Container(
-              width: 40,
-              height: 5,
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(10),
+  void _showLanguagePicker() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Consumer<AppSettingsProvider>(
+          builder: (context, settings, _) => Container(
+            padding: const EdgeInsets.only(top: 12, bottom: 20),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(24),
               ),
             ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle
+                Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
 
-            // Title
-            const Text(
-              "Select Language",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+                // Title
+                Text(
+                  settings.t('home_select_language'),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
 
-            const SizedBox(height: 4),
+                const SizedBox(height: 4),
 
-            const Text(
-              "Choose your preferred language",
-              style: TextStyle(color: Colors.grey),
-            ),
+                Text(
+                  settings.t('home_choose_preferred_language'),
+                  style: TextStyle(color: Colors.grey),
+                ),
 
-            const SizedBox(height: 16),
+                const SizedBox(height: 12),
 
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: settings.availableLanguageCodes.length,
-                itemBuilder: (context, index) {
-                  final code = settings.availableLanguageCodes[index];
-                  final isSelected = settings.languageCode == code;
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: SwitchListTile.adaptive(
+                    value: settings.showAllLanguages,
+                    onChanged: settings.setShowAllLanguages,
+                    title: Text(settings.t('home_show_all_languages')),
+                    subtitle: Text(settings.t('home_show_all_languages_hint')),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  ),
+                ),
 
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 4),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () {
-                        settings.setLanguage(code);
-                        Navigator.pop(sheetContext);
-                      },
-                      child: Container(
+                const SizedBox(height: 8),
+
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: settings.availableLanguageCodes.length,
+                    itemBuilder: (context, index) {
+                      final code = settings.availableLanguageCodes[index];
+                      final isSelected = settings.languageCode == code;
+
+                      return Padding(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 14),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.blue.withOpacity(0.1)
-                              : Colors.grey.shade100,
+                            horizontal: 16, vertical: 4),
+                        child: InkWell(
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isSelected
-                                ? Colors.blue
-                                : Colors.transparent,
+                          onTap: () {
+                            settings.setLanguage(code);
+                            Navigator.pop(sheetContext);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? Colors.blue.withValues(alpha: 0.1)
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isSelected
+                                    ? Colors.blue
+                                    : Colors.transparent,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                // Language Icon
+                                CircleAvatar(
+                                  backgroundColor: Colors.red.shade50,
+                                  child: const Icon(Icons.language,
+                                      color: Colors.red),
+                                ),
+
+                                const SizedBox(width: 12),
+
+                                // Language Label
+                                Expanded(
+                                  child: Text(
+                                    settings.languageLabel(code),
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: isSelected
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
+
+                                // Selected check
+                                if (isSelected)
+                                  const Icon(Icons.check_circle,
+                                      color: Colors.red),
+                              ],
+                            ),
                           ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showAccountSheet() {
+    final authProvider = context.read<AuthProvider>();
+
+    showAccountSheet(
+      context,
+      onLogin: () async {
+        await _openAuthScreen();
+      },
+      onLogout: () async {
+        await _logoutRegisteredUser();
+      },
+      onOpenResponderRequests: _openResponderRequests,
+      isResponderAvailable: authProvider.currentUser?.isResponder == true
+          ? context
+                  .read<ResponderProvider>()
+                  .responderForUserId(authProvider.currentUser!.id)
+                  ?.isAvailable ??
+              true
+          : null,
+      onToggleAvailability: authProvider.currentUser?.isResponder == true
+          ? (value) async {
+              await _toggleAvailability(value);
+            }
+          : null,
+      onDeregisterResponder: authProvider.currentUser?.isResponder == true
+          ? _deregisterResponder
+          : null,
+    );
+  }
+
+  void _showAccessibilitySheet() {
+    final settings = context.read<AppSettingsProvider>();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              decoration: const BoxDecoration(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                color: Colors.white,
+              ),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Drag Handle
+                      Container(
+                        width: 40,
+                        height: 5,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+
+                      // 🔴 Header
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Colors.red, Colors.redAccent],
+                          ),
+                          borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
                           children: [
-                            // Language Icon
-                            CircleAvatar(
-                              backgroundColor: Colors.red.shade50,
-                              child: const Icon(Icons.language,
-                                  color: Colors.red),
-                            ),
-
-                            const SizedBox(width: 12),
-
-                            // Language Label
-                            Expanded(
-                              child: Text(
-                                settings.languageLabel(code),
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
+                            const Icon(Icons.accessibility_new,
+                                color: Colors.white),
+                            const SizedBox(width: 10),
+                            Text(
+                              settings.t('title_accessibility'),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-
-                            // Selected check
-                            if (isSelected)
-                              const Icon(Icons.check_circle,
-                                  color: Colors.red),
                           ],
                         ),
                       ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      );
-    },
-  );
-}
 
-void _showAccountSheet() {
-  final authProvider = context.read<AuthProvider>();
-  final user = authProvider.currentUser;
-
-  showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
-    builder: (sheetContext) {
-      if (user == null) {
-        return const Padding(
-          padding: EdgeInsets.all(20),
-          child: Center(child: Text('Not signed in')),
-        );
-      }
-
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-
-            Container(
-              height: 4,
-              width: 40,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade400,
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  child: Text(
-                    user.displayName.isNotEmpty
-                        ? user.displayName[0].toUpperCase()
-                        : 'U',
-                    style: const TextStyle(fontSize: 20),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        user.displayName,
-                        style: Theme.of(context).textTheme.titleLarge,
+                      const SizedBox(height: 16),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          settings.t('accessibility_screen_reader_hint'),
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 14,
+                          ),
+                        ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        user.email.isEmpty
-                            ? (user.phoneNumber ?? 'No email')
-                            : user.email,
-                        style: TextStyle(color: Colors.grey.shade600),
+
+                      const SizedBox(height: 16),
+
+                      // 🔧 Settings Cards
+                      _buildSwitchCard(
+                        title: settings.t('label_haptics'),
+                        icon: Icons.vibration,
+                        value: settings.hapticsEnabled,
+                        onChanged: (v) {
+                          settings.setHapticsEnabled(v);
+                          if (mounted) {
+                            _showSnackBar(v
+                                ? settings.t('accessibility_haptics_enabled')
+                                : settings.t('accessibility_haptics_disabled'));
+                          }
+                          setModalState(() {});
+                        },
+                      ),
+
+                      _buildSwitchCard(
+                        title: settings.t('label_flashlight'),
+                        subtitle: settings.t('label_flashlight_hint'),
+                        icon: Icons.flashlight_on,
+                        value: settings.sosFlashEnabled,
+                        onChanged: (v) {
+                          settings.setSosFlashEnabled(v);
+                          if (mounted) {
+                            _showSnackBar(v
+                                ? settings.t('accessibility_flashlight_enabled')
+                                : settings
+                                    .t('accessibility_flashlight_disabled'));
+                          }
+                          setModalState(() {});
+                        },
+                      ),
+
+                      _buildSwitchCard(
+                        title: settings.t('label_high_contrast'),
+                        icon: Icons.contrast,
+                        value: settings.highContrastEnabled,
+                        onChanged: (v) {
+                          settings.setHighContrastEnabled(v);
+                          setModalState(() {});
+                        },
+                      ),
+
+                      _buildSwitchCard(
+                        title: settings.t('label_notifications'),
+                        subtitle: settings.t('label_notifications_hint'),
+                        icon: Icons.notifications_active,
+                        value: settings.notificationsEnabled,
+                        onChanged: (value) async {
+                          if (value) {
+                            final granted =
+                                await NotificationService.requestPermissions();
+                            settings.setNotificationsEnabled(granted);
+
+                            if (granted) {
+                              _startOpenAppChatNotificationWatchers();
+                            } else {
+                              _stopOpenAppChatNotificationWatchers();
+                            }
+
+                            if (!granted && mounted) {
+                              _showSnackBar(settings
+                                  .t('notification_permission_not_granted'));
+                            }
+                          } else {
+                            settings.setNotificationsEnabled(false);
+                            _stopOpenAppChatNotificationWatchers();
+                          }
+                          setModalState(() {});
+                        },
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // 🔤 Text Size Card
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.text_fields,
+                                    color: Colors.red),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                    child: Text(settings.t('label_text_size'))),
+                                Text(
+                                  '${(settings.textScaleFactor * 100).round()}%',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                            SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                activeTrackColor: Colors.red,
+                                thumbColor: Colors.red,
+                              ),
+                              child: Slider(
+                                min: 0.85,
+                                max: 1.6,
+                                value: settings.textScaleFactor,
+                                onChanged: (value) {
+                                  settings.setTextScaleFactor(value);
+                                  setModalState(() {});
+                                },
+                              ),
+                            ),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  settings.setTextScaleFactor(1.0);
+                                  setModalState(() {});
+                                },
+                                icon: const Icon(Icons.restart_alt,
+                                    color: Colors.red),
+                                label: Text(
+                                  settings.t('button_reset'),
+                                  style: TextStyle(color: Colors.red),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // 🧪 Test Buttons
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            onPressed: () async {
+                              await _runVoiceTest(
+                                settings.t('accessibility_announcement_text'),
+                              );
+                              if (mounted) {
+                                _showSnackBar(settings
+                                    .t('accessibility_announcement_sent'));
+                              }
+                            },
+                            icon: const Icon(Icons.record_voice_over),
+                            label: Text(context
+                                .read<AppSettingsProvider>()
+                                .t('button_voice_test')),
+                          ),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              side: const BorderSide(color: Colors.red),
+                            ),
+                            onPressed: () async {
+                              await _pulseFlash();
+                              if (mounted) {
+                                _showSnackBar(
+                                    settings.t('flash_test_completed'));
+                              }
+                            },
+                            icon: const Icon(Icons.flashlight_on),
+                            label: Text(context
+                                .read<AppSettingsProvider>()
+                                .t('button_flash_test')),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Chip(
-                label: Text(
-                  authProvider.isAnonymousUser
-                      ? 'Anonymous Session'
-                      : 'Registered Account',
-                ),
               ),
-            ),
-            const SizedBox(height: 20),					
-            Column(
-              children: [	 
-                if (authProvider.isAnonymousUser)
-                  SizedBox(
-                    width: double.infinity,		   
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(sheetContext).pop();
-                        _openAuthScreen();
-                      },
-                      icon: const Icon(Icons.login),
-                      label: const Text('Sign In / Create Account'),
-                    ),
-                  ),
+            );
+          },
+        );
+      },
+    );
+  }
 
-                if (!authProvider.isAnonymousUser)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        Navigator.of(sheetContext).pop();
-                        await _logoutRegisteredUser();
-                      },
-                      icon: const Icon(Icons.logout),
-                      label: const Text('Sign Out'),
-                    ),
-                  ),
+  void _showCommsSimulationSheet() {
+    final comms = context.read<CommsProvider>();
 
-                if (user.isResponder)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.of(sheetContext).pop();
-                        _openResponderRequests();
-                      },
-                      icon: const Icon(Icons.list_alt),
-                      label: const Text('People Needing Help'),
-                    ),
-				  
-                  ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // 🔹 Responder Section
-            if (user.isResponder)
-              Consumer<ResponderProvider>(
-                builder: (context, responderProvider, _) {
-                  final mine = responderProvider.responders
-                      .where((r) => r.userId == user.id)
-                      .toList();
-
-                  final isAvailable =
-                      mine.isEmpty ? true : mine.first.isAvailable;
-
-                  return Card(
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          SwitchListTile.adaptive(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('Responder Online'),
-                            value: isAvailable,
-                            onChanged: _toggleAvailability,
-                          ),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: () async {
-                                Navigator.of(sheetContext).pop();
-                                await _deregisterResponder();
-                              },
-                              child: const Text(
-                                'De-register as responder',
-                                style: TextStyle(color: Colors.red),
-                              ),			  
-                            ),
-							  
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
               ),
-          ],
-        ),
-      );
-    },
-  );
-}
-
-void _showAccessibilitySheet() {
-  final settings = context.read<AppSettingsProvider>();
-
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) {
-      return StatefulBuilder(
-        builder: (context, setModalState) {
-          return Container(
-            decoration: const BoxDecoration(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              color: Colors.white,
-            ),
-            child: SingleChildScrollView(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-
                     // Drag Handle
-                    Container(
-                      width: 40,
-                      height: 5,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 5,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
 
@@ -1055,13 +1537,14 @@ void _showAccessibilitySheet() {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
-                        children: const [
-                          Icon(Icons.accessibility_new,
-                              color: Colors.white),
-                          SizedBox(width: 10),
+                        children: [
+                          const Icon(Icons.wifi_tethering, color: Colors.white),
+                          const SizedBox(width: 10),
                           Text(
-                            'Accessibility',
-                            style: TextStyle(
+                            context
+                                .read<AppSettingsProvider>()
+                                .t('comms_simulation_title'),
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -1070,346 +1553,133 @@ void _showAccessibilitySheet() {
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: Colors.red.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<CommsMode>(
+                          value: comms.mode,
+                          isExpanded: true,
+                          icon: const Icon(Icons.keyboard_arrow_down,
+                              color: Colors.red),
+                          dropdownColor: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
 
-                    // 🔧 Settings Cards
-                    _buildSwitchCard(
-                      title: 'Haptic vibration for SOS',
-                      icon: Icons.vibration,
-                      value: settings.hapticsEnabled,
-                      onChanged: (v) {
-                        settings.setHapticsEnabled(v);
-                        setModalState(() {});
-                      },
-                    ),
+                          // Selected item display
+                          selectedItemBuilder: (context) {
+                            final settings =
+                                context.read<AppSettingsProvider>();
+                            return CommsMode.values.map((mode) {
+                              return Row(
+                                children: [
+                                  Text(
+                                    comms.modeLabel(mode, settings),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }).toList();
+                          },
 
-                    _buildSwitchCard(
-                      title: 'Flash light pulse on SOS',
-                      subtitle: 'Uses device torch if available',
-                      icon: Icons.flashlight_on,
-                      value: settings.sosFlashEnabled,
-                      onChanged: (v) {
-                        settings.setSosFlashEnabled(v);
-                        setModalState(() {});
-                      },
-                    ),
+                          items: CommsMode.values.map((mode) {
+                            final settings =
+                                context.read<AppSettingsProvider>();
+                            return DropdownMenuItem<CommsMode>(
+                              value: mode,
+                              child: Row(
+                                children: [
+                                  Text(comms.modeLabel(mode, settings)),
+                                ],
+                              ),
+                            );
+                          }).toList(),
 
-                    _buildSwitchCard(
-                      title: 'High contrast mode',
-                      icon: Icons.contrast,
-                      value: settings.highContrastEnabled,
-                      onChanged: (v) {
-                        settings.setHighContrastEnabled(v);
-                        setModalState(() {});
-                      },
-                    ),
-
-                    _buildSwitchCard(
-                      title: 'Enable notifications',
-                      subtitle: 'Local SOS status alerts',
-                      icon: Icons.notifications_active,
-                      value: settings.notificationsEnabled,
-                      onChanged: (value) async {
-                        if (value) {
-                          final granted =
-                              await NotificationService.requestPermissions();
-                          settings.setNotificationsEnabled(granted);
-
-                          if (!granted && mounted) {
-                            _showSnackBar(
-                                'Notification permission not granted.');
-                          }
-                        } else {
-                          settings.setNotificationsEnabled(false);
-                        }		 
-                        setModalState(() {});
-                      },
+                          onChanged: (value) {
+                            if (value != null) {
+                              comms.setMode(value);
+                              setModalState(() {});
+                            }
+                          },
+                        ),
+                      ),
                     ),
 
                     const SizedBox(height: 12),
 
-                    // 🔤 Text Size Card
+                    // 🔧 Switch Cards
+                    _buildCommsSwitch(
+                      title: context
+                          .read<AppSettingsProvider>()
+                          .t('comms_simulate_tower_failure'),
+                      icon: Icons.signal_cellular_off,
+                      value: comms.simulateTowerFailure,
+                      onChanged: (v) {
+                        comms.setSimulateTowerFailure(v);
+                        setModalState(() {});
+                      },
+                    ),
+
+                    _buildCommsSwitch(
+                      title: context
+                          .read<AppSettingsProvider>()
+                          .t('comms_device_supports_satellite'),
+                      subtitle: context
+                          .read<AppSettingsProvider>()
+                          .t('comms_simulated_capability'),
+                      icon: Icons.satellite_alt,
+                      value: comms.deviceSupportsSatellite,
+                      onChanged: (v) {
+                        comms.setDeviceSupportsSatellite(v);
+                        setModalState(() {});
+                      },
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    // ⚠️ Info Box
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(18),
+                        color: Colors.red.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.3)),
                       ),
-                      child: Column(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.text_fields,
-                                  color: Colors.red),
-                              const SizedBox(width: 8),
-                              const Expanded(child: Text('Text Size')),
-                              Text(
-                                '${(settings.textScaleFactor * 100).round()}%',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                          SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              activeTrackColor: Colors.red,
-                              thumbColor: Colors.red,
-                            ),
-                            child: Slider(
-                              min: 0.85,
-                              max: 1.6,
-                              value: settings.textScaleFactor,
-                              onChanged: (value) {
-                                settings.setTextScaleFactor(value);
-                                setModalState(() {});
-                              },
-                            ),
-                          ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              onPressed: () {
-                                settings.setTextScaleFactor(1.0);
-                                setModalState(() {});
-                              },
-                              icon: const Icon(Icons.restart_alt,
-                                  color: Colors.red),
-                              label: const Text(
-                                'Reset',
-                                style: TextStyle(color: Colors.red),
-                              ),
+                          const Icon(Icons.info_outline, color: Colors.red),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              context
+                                  .read<AppSettingsProvider>()
+                                  .t('comms_simulation_info'),
+                              style: const TextStyle(fontSize: 13),
                             ),
                           ),
                         ],
                       ),
                     ),
-
-                    const SizedBox(height: 14),
-
-                    // 🧪 Test Buttons
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          onPressed: () {
-                            _announce(
-                              'Accessibility test announcement. SOS button is centered below information cards.',
-                            );
-                            _showSnackBar(
-                                'Screen reader announcement sent.');
-                          },
-                          icon: const Icon(Icons.record_voice_over),
-                          label: const Text('Voice Test'),
-                        ),
-                        OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                          ),
-                          onPressed: () async {
-                            await _pulseFlash();
-                            if (mounted) {
-                              _showSnackBar(
-                                  'Flash pulse test completed.');
-                            }
-                          },
-                          icon: const Icon(Icons.flashlight_on),
-                          label: const Text('Flash Test'),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
               ),
-            ),
-          );
-        },
-      );
-    },
-  );
-}
-
-void _showCommsSimulationSheet() {
-  final comms = context.read<CommsProvider>();
-
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: Colors.transparent,
-    isScrollControlled: true,
-    builder: (sheetContext) {
-      return StatefulBuilder(
-        builder: (context, setModalState) {
-          return Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-
-                  // Drag Handle
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 5,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
-
-                  // 🔴 Header
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Colors.red, Colors.redAccent],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: const [
-                        Icon(Icons.wifi_tethering, color: Colors.white),
-                        SizedBox(width: 10),
-                        Text(
-                          'Comms Simulation',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                 Container(
-  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-  decoration: BoxDecoration(
-    color: Colors.grey.shade100,
-    borderRadius: BorderRadius.circular(18),
-    border: Border.all(
-      color: Colors.red.withOpacity(0.3),
-    ),
-  ),
-  child: DropdownButtonHideUnderline(
-    child: DropdownButton<CommsMode>(
-      value: comms.mode,
-      isExpanded: true,
-      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.red),
-      dropdownColor: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-
-      // Selected item display
-      selectedItemBuilder: (context) {
-        return CommsMode.values.map((mode) {
-          return Row(
-            children: [
-              Text(
-                comms.modeLabel(mode),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          );
-        }).toList();
-      },
-
-      items: CommsMode.values.map((mode) {
-        return DropdownMenuItem<CommsMode>(
-          value: mode,
-          child: Row(
-            children: [
-              Text(comms.modeLabel(mode)),
-            ],
-          ),
+            );
+          },
         );
-      }).toList(),
-
-      onChanged: (value) {
-        if (value != null) {
-          comms.setMode(value);
-          setModalState(() {});
-        }
       },
-    ),
-  ),
-),
-
-                  const SizedBox(height: 12),
-
-                  // 🔧 Switch Cards
-                  _buildCommsSwitch(
-                    title: 'Simulate tower failure',
-                    icon: Icons.signal_cellular_off, 
-                    value: comms.simulateTowerFailure,
-                    onChanged: (v) {
-                      comms.setSimulateTowerFailure(v);
-                      setModalState(() {});
-                    },
-                  ),
-
-                  _buildCommsSwitch(
-                    title: 'Device supports satellite',
-                    subtitle: 'Simulated capability',
-                    icon: Icons.satellite_alt,
-                    value: comms.deviceSupportsSatellite,
-                    onChanged: (v) {
-                      comms.setDeviceSupportsSatellite(v);
-                      setModalState(() {});
-                    },
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // ⚠️ Info Box
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.red.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Icon(Icons.info_outline, color: Colors.red),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'This simulation allows testing disaster or lockdown connectivity fallback without real mesh or satellite hardware.',
-                            style: TextStyle(fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-			
-          );
-        },
-      );
-    },
-  );
-}
+    );
+  }
 
   Future<void> _deregisterResponder() async {
     final authProvider = context.read<AuthProvider>();
@@ -1439,12 +1709,16 @@ void _showCommsSimulationSheet() {
       return;
     }
 
+    final snackMessage =
+        context.read<AppSettingsProvider>().t(value ? 'snackbar_responder_online' : 'snackbar_responder_offline');
+
     await responderProvider.setResponderAvailability(
       userId: userId,
       isAvailable: value,
     );
 
-    final mine = responderProvider.responders.where((r) => r.userId == userId).toList();
+    final mine =
+        responderProvider.responders.where((r) => r.userId == userId).toList();
     final profile = mine.isEmpty ? null : mine.first;
     await NotificationService.syncDeviceProfile(
       userId: userId,
@@ -1455,7 +1729,7 @@ void _showCommsSimulationSheet() {
     );
 
     if (mounted) {
-      _showSnackBar(value ? 'Responder is online.' : 'Responder is offline.');
+      _showSnackBar(snackMessage);
     }
   }
 
@@ -1464,16 +1738,18 @@ void _showCommsSimulationSheet() {
 
   Future<void> _makeEmergencyCall() async {
     final uri = Uri.parse('tel:112');
+    final failureMessage =
+        context.read<AppSettingsProvider>().t('snackbar_dialer_failed');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
     } else {
-      _showSnackBar('Could not open dialer. Please call 112 manually.');
+      _showSnackBar(failureMessage);
     }
   }
 
   Future<void> _toggleVoiceInput() async {
     if (!_speechReady) {
-      _showSnackBar('Voice input is not available on this device.');
+      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_voice_input_unavailable'));
       return;
     }
 
@@ -1497,12 +1773,9 @@ void _showCommsSimulationSheet() {
         setState(() {
           _isTranscribing = true;
           _voiceTranscript = words.isEmpty ? _voiceTranscript : words;
-          if (words.isNotEmpty) {
-            _transcriptionProvider = 'On-device speech';
-            _transcriptionConfidence = null;
-          }
           if (words.isNotEmpty &&
-              (result.finalResult || _emergencyContextController.text.trim().isEmpty)) {
+              (result.finalResult ||
+                  _emergencyContextController.text.trim().isEmpty)) {
             _emergencyContextController.text = words;
             _emergencyContextController.selection = TextSelection.fromPosition(
               TextPosition(offset: _emergencyContextController.text.length),
@@ -1516,7 +1789,8 @@ void _showCommsSimulationSheet() {
       ),
       listenFor: const Duration(minutes: 2),
       pauseFor: const Duration(seconds: 8),
-      localeId: _speechLocaleForLanguage(context.read<AppSettingsProvider>().languageCode),
+      localeId: _speechLocaleForLanguage(
+          context.read<AppSettingsProvider>().languageCode),
     );
 
     if (mounted) {
@@ -1529,7 +1803,8 @@ void _showCommsSimulationSheet() {
   Future<void> _toggleVoiceClipRecording() async {
     final canRecordAudio = await _audioRecorder.hasPermission();
     if (!canRecordAudio) {
-      _showSnackBar('Microphone permission is required for voice clip recording.');
+      _showSnackBar(
+          'Microphone permission is required for voice clip recording.');
       return;
     }
 
@@ -1549,7 +1824,8 @@ void _showCommsSimulationSheet() {
     }
 
     final tempDir = await getTemporaryDirectory();
-    final voicePath = '${tempDir.path}/clip_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final voicePath =
+        '${tempDir.path}/clip_${DateTime.now().millisecondsSinceEpoch}.wav';
     await _audioRecorder.start(
       const RecordConfig(
         encoder: AudioEncoder.wav,
@@ -1588,7 +1864,6 @@ void _showCommsSimulationSheet() {
   void _removePhotoAttachment() {
     setState(() {
       _selectedImage = null;
-      _attachmentType = null;
     });
   }
 
@@ -1668,6 +1943,7 @@ void _showCommsSimulationSheet() {
     required String semanticsLabel,
     required VoidCallback onOpen,
     required VoidCallback onRemove,
+    IconData? openIcon,
     IconData? statusIcon,
     Color? statusColor,
   }) {
@@ -1715,14 +1991,15 @@ void _showCommsSimulationSheet() {
           ),
           if (statusIcon != null) ...[
             const SizedBox(width: 8),
-            Icon(statusIcon, size: 16, color: statusColor ?? Colors.green.shade700),
+            Icon(statusIcon,
+                size: 16, color: statusColor ?? Colors.green.shade700),
           ],
           const SizedBox(width: 2),
           IconButton(
             visualDensity: VisualDensity.compact,
             tooltip: semanticsLabel,
             onPressed: onOpen,
-            icon: const Icon(Icons.visibility_outlined, size: 18),
+            icon: Icon(openIcon ?? Icons.visibility_outlined, size: 18),
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
@@ -1744,20 +2021,6 @@ void _showCommsSimulationSheet() {
       case 'en':
       default:
         return 'en-IN';
-    }
-  }
-
-  List<String> _speechAlternatives(String locale) {
-    switch (locale) {
-      case 'ta-IN':
-        return const <String>['en-IN', 'hi-IN'];
-      case 'hi-IN':
-        return const <String>['en-IN', 'ta-IN'];
-      case 'en-US':
-        return const <String>['en-IN', 'hi-IN'];
-      case 'en-IN':
-      default:
-        return const <String>['ta-IN', 'hi-IN'];
     }
   }
 
@@ -1785,36 +2048,11 @@ void _showCommsSimulationSheet() {
     }
   }
 
-  String _contentTypeForName(String fileName) {
-    final lower = fileName.toLowerCase();
-    if (lower.endsWith('.png')) {
-      return 'image/png';
-    }
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-      return 'image/jpeg';
-    }
-    return 'image/jpeg';
-  }
-
-  Future<String?> _uploadAttachmentIfNeeded(String userId) async {
-    final image = _selectedImage;
-    if (image == null) {
-      return null;
-    }
-    return _mediaUploadService.uploadEmergencyImage(image: image, userId: userId);
-  }
-
-  Future<String?> _uploadVoiceAudioIfNeeded(String userId) async {
-    final localPath = _voiceAudioPath;
-    if (localPath == null || localPath.trim().isEmpty) {
-      return null;
-    }
-    return _mediaUploadService.uploadEmergencyVoice(localPath: localPath, userId: userId);
-  }
-
   @override
   void dispose() {
     _responderPollingTimer?.cancel();
+    _stopOpenAppChatNotificationWatchers();
+    _flutterTts.stop();
     _speechToText.stop();
     _audioRecorder.dispose();
     _voicePreviewCompleteSub?.cancel();
@@ -1823,32 +2061,60 @@ void _showCommsSimulationSheet() {
     super.dispose();
   }
 
+  PageRouteBuilder<void> _noTransitionRoute(Widget page) {
+    return PageRouteBuilder<void>(
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      transitionsBuilder: (_, __, ___, child) => child,
+    );
+  }
+
+  Future<void> _handleHomeHeaderMenuSelection(
+      _HomeHeaderMenuOption option) async {
+    final authProvider = context.read<AuthProvider>();
+
+    switch (option) {
+      case _HomeHeaderMenuOption.language:
+        _showLanguagePicker();
+        break;
+      case _HomeHeaderMenuOption.accessibility:
+        _showAccessibilitySheet();
+        break;
+      case _HomeHeaderMenuOption.commsSimulation:
+        _showCommsSimulationSheet();
+        break;
+      case _HomeHeaderMenuOption.viewSosHistory:
+        final currentUser = authProvider.currentUser;
+        if (currentUser != null) {
+          SosHistoryScreen.open(
+            context,
+            currentUserId: currentUser.id,
+            currentUserName: currentUser.displayName,
+          );
+        }
+        break;
+      case _HomeHeaderMenuOption.aboutApp:
+        _showAboutAppDialog();
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
     final authProvider = context.watch<AuthProvider>();
-    final commsProvider = context.watch<CommsProvider>();
-		
-	 // Build icon list dynamically
-        final List<IconData> iconList = [
-          Icons.language,
-          if (authProvider.currentUser?.isResponder == true)
-            Icons.support_agent,
-          Icons.cell_tower,
-          Icons.map,
-          Icons.account_circle,
-        ];
 
-        // Map actions
-        final List<VoidCallback> actions = [
-          _showLanguagePicker,
-          if (authProvider.currentUser?.isResponder == true)
-            _openResponderRequests,
-          _showCommsSimulationSheet,
-          _openMap,
-          _showAccountSheet,
-        ];
-										 
+    void showResponderOnlySnackbar() {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(settings.t('snackbar_responder_only_feature')),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -1857,496 +2123,422 @@ void _showCommsSimulationSheet() {
         elevation: 0,
         backgroundColor: Colors.red.shade700,
         actions: [
-           IconButton(
-            icon: const Icon(Icons.accessibility_new),
-            onPressed: _showAccessibilitySheet,
-            tooltip: 'Accessibility',
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 20),
-          child: Column(
-            children: [
-              // Top section: Info
-              Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+          PopupMenuButton<_HomeHeaderMenuOption>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: _handleHomeHeaderMenuSelection,
+            itemBuilder: (_) => <PopupMenuEntry<_HomeHeaderMenuOption>>[
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.language,
+                child: Row(
                   children: [
-                    Text(
-                      settings.t('emergency_prompt'),
-                      style: Theme.of(context).textTheme.headlineSmall,
-                      textAlign: TextAlign.center,
-                    ),
-                    Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Consumer<ResponderProvider>(
-          builder: (context, responderProvider, _) {
-            return IntrinsicHeight(
-              child :Row(
-              children: [
-                Expanded(
-                  child: _actionCard(
-                    title: settings.t('total_responders'),
-                    value:
-                        responderProvider.responders.length.toString(),
-                    icon: Icons.people,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _actionCard(
-                    title: settings.t('nearby_5km'),
-                    value: responderProvider
-                        .nearbyResponders.length
-                        .toString(),
-                    icon: Icons.location_on,
-                  ),
-                ),
-                ]
-                ));})),	
-                
-                						
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _openResponderAction,
-                        icon: const Icon(Icons.health_and_safety),
-                        label: Text(
-                          authProvider.currentUser?.isResponder == true
-                              ? 'Responder Dashboard'
-                              : settings.t('become_responder'),
-                        ),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 8),
-					                    TextField(
-  controller: _emergencyContextController,
-  minLines: 1,
-  maxLines: 3,
-  cursorColor: Colors.red,
-
-  decoration: InputDecoration(
-    labelText: 'Emergency details (optional)',
-    hintText:
-        'Example: elderly person fell, flood nearby, child missing, no transport',
-
-    filled: true,
-    fillColor: Colors.red.shade50,
-
-    border: OutlineInputBorder(												   
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.red.shade200),
-    ),
-
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.red.shade300, width: 1.2),													   
-    ),
-
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.red.shade600, width: 2),
-						  
-    ),
-
-    errorBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: const BorderSide(color: Colors.red),
-					  
-    ),
-
-    labelStyle: TextStyle(color: Colors.red.shade700),
-    hintStyle: TextStyle(color: Colors.red.shade300),				  
-    contentPadding: const EdgeInsets.symmetric(
-      horizontal: 16,
-      vertical: 14,									 
-    ),
-
-    prefixIcon: Icon(
-      Icons.warning_amber_rounded,											
-      color: Colors.red.shade400,
-    ),
-  ),					  
-),
-										   
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          IconButton.filledTonal(
-                            tooltip: _isTranscribing ? 'Stop voice-to-text' : 'Voice to text',
-                            onPressed: _speechReady ? _toggleVoiceInput : null,
-                            icon: Icon(_isTranscribing ? Icons.stop : Icons.mic),
-                          ),
-                          IconButton.filledTonal(
-                            tooltip: _isRecordingClip ? 'Stop voice clip' : 'Record voice clip',
-                            onPressed: _toggleVoiceClipRecording,
-                            icon: Icon(
-                              _isRecordingClip ? Icons.stop_circle : Icons.keyboard_voice_rounded,
-                            ),
-                          ),
-                          IconButton.filledTonal(
-                            tooltip: _isPreviewPlaying ? 'Stop preview' : 'Play preview',
-                            onPressed: (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
-                                ? _toggleLocalVoicePreview
-                                : null,
-                            icon: Icon(_isPreviewPlaying ? Icons.stop : Icons.play_arrow),
-                          ),
-                          if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.blueGrey.shade50,
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: Colors.blueGrey.shade100),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _includeVoiceClip ? Icons.link : Icons.link_off,
-                                    size: 15,
-                                    color: _includeVoiceClip
-                                        ? Colors.teal.shade700
-                                        : Colors.grey.shade600,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Icon(
-                                    _isRecordingClip
-                                        ? Icons.fiber_manual_record
-                                        : Icons.check_circle,
-                                    size: 15,
-                                    color: _isRecordingClip
-                                        ? Colors.red.shade700
-                                        : Colors.green.shade700,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          IconButton.filledTonal(
-                            tooltip: 'Capture photo',
-                            onPressed: _pickCameraImage,
-                            icon: const Icon(Icons.camera_alt),
-                          ),
-                          FilterChip(
-                            selected: _forceCriticalSeverity,
-                            label: const Text('Force Critical'),
-                            selectedColor: Colors.red.shade100,
-                            checkmarkColor: Colors.red.shade800,
-                            onSelected: (value) {
-                              setState(() {
-                                _forceCriticalSeverity = value;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        commsProvider.forceOfflineAi
-                            ? 'Visual AI disabled (Local fallback)'
-                            : 'Visual AI enabled (Gemini multimodal)',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: commsProvider.forceOfflineAi
-                                  ? Colors.orange.shade800
-                                  : Colors.blue.shade800,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        _cloudTranscriptionEnabled
-                            ? 'Transcription: Cloud assist enabled'
-                            : 'Transcription: On-device only (free mode)',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: _cloudTranscriptionEnabled
-                                  ? Colors.teal.shade800
-                                  : Colors.green.shade800,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                    ),
-                    if (_voiceTranscript != null && _voiceTranscript!.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          Chip(
-                            avatar: const Icon(Icons.subtitles, size: 18),
-                            label: Text(
-                              _transcriptionConfidence == null
-                                  ? 'Transcript ready'
-                                  : 'Transcript ${( _transcriptionConfidence! * 100).toStringAsFixed(0)}%',
-                            ),
-                          ),
-                          if (_transcriptionProvider.isNotEmpty)
-                            Chip(
-                              avatar: const Icon(Icons.mic_external_on_outlined, size: 18),
-                              label: Text(_transcriptionProvider),
-                            ),
-                        ],
-                      ),
-                    ],
-                    if (_selectedImage != null ||
-                        (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              if (_selectedImage != null)
-                                _buildAttachmentCard(
-                                  icon: Icons.image_outlined,
-                                  fileName: _selectedImage!.name.isEmpty
-                                      ? 'photo_attachment.jpg'
-                                      : _selectedImage!.name,
-                                  fileKind: 'Photo attachment',
-                                  semanticsLabel: 'View attached photo',
-                                  onOpen: _previewSelectedPhoto,
-                                  onRemove: _removePhotoAttachment,
-                                ),
-                              if (_selectedImage != null &&
-                                  _voiceAudioPath != null &&
-                                  _voiceAudioPath!.isNotEmpty)
-                                const SizedBox(width: 8),
-                              if (_voiceAudioPath != null && _voiceAudioPath!.isNotEmpty)
-                                _buildAttachmentCard(
-                                  icon: Icons.graphic_eq_rounded,
-                                  fileName: 'voice_clip.wav',
-                                  fileKind: 'Voice attachment',
-                                  semanticsLabel: 'Play attached voice clip',
-                                  onOpen: _toggleLocalVoicePreview,
-                                  onRemove: () {
-                                    _removeVoiceAttachment();
-                                  },
-                                  statusIcon:
-                                      _includeVoiceClip ? Icons.link : Icons.link_off,
-                                  statusColor: _includeVoiceClip
-                                      ? Colors.teal.shade700
-                                      : Colors.grey.shade600,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: commsProvider.forceOfflineAi
-                            ? Colors.orange.shade50
-                            : Colors.blue.shade50,
-                        border: Border.all(
-                          color: commsProvider.forceOfflineAi
-                              ? Colors.orange.shade300
-                              : Colors.blue.shade300,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            commsProvider.forceOfflineAi ? Icons.cloud_off : Icons.auto_awesome,
-                            size: 18,
-                            color: commsProvider.forceOfflineAi
-                                ? Colors.orange.shade800
-                                : Colors.blue.shade800,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            commsProvider.forceOfflineAi
-                                ? 'Local Fallback'
-                                : 'Powered by Gemini',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                  color: commsProvider.forceOfflineAi
-                                      ? Colors.orange.shade900
-                                      : Colors.blue.shade900,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    // Location status
-                      Consumer<LocationProvider>(
-  builder: (context, locationProvider, _) {
-										 
-    final isReady = locationProvider.hasLocation;
-
-    return !isReady ?Container(
-      margin: const EdgeInsets.symmetric( vertical: 10),
-      padding: const EdgeInsets.symmetric( horizontal: 16,vertical: 14),
-      decoration: BoxDecoration(								
-        color: Colors.black,
-							  
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          // LEFT TEXT + ICON
-          Expanded(
-            child: Row(
-              children: [
-                Icon(
-															   
-                  isReady ? Icons.location_on : Icons.location_off,
-                  color: isReady ? Colors.greenAccent : Colors.orangeAccent,					
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    isReady
-                        ? settings.t('location_ready')
-                        : settings.t('location_not_ready'),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // RIGHT BUTTON
-          if (!isReady)
-            _actionChip(
-              label: "Fix",				  
-              onTap: () async {
-  if (!locationProvider.hasLocation) {												 
-    await locationProvider.openPermissionSettings();
-  } else {												 
-    await locationProvider.openLocationSettings();
-  }
-}
-            ),
-        ],
-      ),
-    ): SizedBox(height: 50);				  
-  },
-),
+                    const Icon(Icons.language, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('home_select_language')),
                   ],
                 ),
               ),
-              // Center section: SOS Button
-              Consumer<AuthProvider>(
-                builder: (context, authProvider, _) {
-                  return Consumer<ResponderProvider>(
-                    builder: (context, responderProvider, _) {
-                      return SOSButton(
-                        onPressed: _handleSOSPress,
-                        isLoading: _isSosInProgress,
-                        enableHaptics: settings.hapticsEnabled,
-                      );
-                    },
-                  );
-                },
-              ),
-
-              const SizedBox(height: 20),
-
-              // Bottom section: Quick info
-              Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.accessibility,
+                child: Row(
                   children: [
-                    // Responders status
-                    Consumer<ResponderProvider>(
-                      builder: (context, responderProvider, _) {
-                        return Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.purple.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.purple),
+                    const Icon(Icons.accessibility_new, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('title_accessibility')),
+                  ],
+                ),
+              ),
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.commsSimulation,
+                child: Row(
+                  children: [
+                    const Icon(Icons.wifi_tethering, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('comms_simulation_title')),
+                  ],
+                ),
+              ),
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.viewSosHistory,
+                child: Row(
+                  children: [
+                    const Icon(Icons.history, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('button_view_sos_history')),
+                  ],
+                ),
+              ),
+              PopupMenuItem<_HomeHeaderMenuOption>(
+                value: _HomeHeaderMenuOption.aboutApp,
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(settings.t('button_about_app')),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragEnd: (details) {
+            if (details.primaryVelocity != null &&
+                details.primaryVelocity! < -300) {
+              final auth = context.read<AuthProvider>();
+              if (auth.currentUser?.isResponder == true) {
+                Navigator.of(context).pushReplacement(
+                  _noTransitionRoute(const ResponderRequestsScreen()),
+                );
+              } else {
+                _openChats();
+              }
+            }
+          },
+          child: SingleChildScrollView(
+              child: Padding(
+                  padding: const EdgeInsets.only(bottom: 20),
+                  child: Column(children: [
+                    // Top section: Info
+                    Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            settings.t('emergency_prompt'),
+                            style: Theme.of(context).textTheme.headlineSmall,
+                            textAlign: TextAlign.center,
                           ),
-                          child: Row(
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _openResponderAction,
+                              icon: const Icon(Icons.health_and_safety),
+                              label: Text(
+                                authProvider.currentUser?.isResponder == true
+                                    ? settings.t('button_responder_dashboard')
+                                    : settings.t('become_responder'),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Padding(
+                              padding: const EdgeInsets.all(20.0),
+                              child: Consumer<ResponderProvider>(
+                                  builder: (context, responderProvider, _) {
+                                return IntrinsicHeight(
+                                    child: Row(children: [
+                                  Expanded(
+                                    child: _actionCard(
+                                      title: settings.t('total_responders'),
+                                      value: responderProvider.responders.length
+                                          .toString(),
+                                      icon: Icons.people,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: _actionCard(
+                                      title: settings.t('nearby_5km'),
+                                      value: responderProvider
+                                          .nearbyResponders.length
+                                          .toString(),
+                                      icon: Icons.location_on,
+                                    ),
+                                  ),
+                                ]));
+                              })),
+                          const SizedBox(height: 8),
+                          Consumer<AuthProvider>(
+                            builder: (context, authProvider, _) {
+                              final sosStatus =
+                                  context.watch<SosStatusProvider>();
+                              final activeSosId =
+                                  sosStatus.activeSosId ?? _currentSosRequestId;
+                              final hasActiveSos = activeSosId != null;
+                              return Consumer<ResponderProvider>(
+                                builder: (context, responderProvider, _) {
+                                  final isCancelMode =
+                                      _isSosInProgress || hasActiveSos;
+                                  return Column(
+                                    children: [
+                                      if (hasActiveSos)
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12.0),
+                                          child: Container(
+                                            width: double.infinity,
+                                            decoration: BoxDecoration(
+                                              color: Colors.red.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                              border: Border.all(
+                                                  color: Colors.red.shade200),
+                                            ),
+                                            padding: const EdgeInsets.all(14),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    settings
+                                                        .t('status_sos_active'),
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodyMedium
+                                                        ?.copyWith(
+                                                          color: Colors
+                                                              .red.shade900,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                        ),
+                                                  ),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () =>
+                                                      _cancelActiveSosButton(
+                                                          activeSosId),
+                                                  style: TextButton.styleFrom(
+                                                    foregroundColor:
+                                                        Colors.red.shade900,
+                                                  ),
+                                                  child: Text(settings
+                                                      .t('button_cancel_sos')),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      SOSButton(
+                                        onPressed: isCancelMode
+                                            ? (_isSosInProgress
+                                                ? _cancelPendingSos
+                                                : () => _cancelActiveSosButton(
+                                                    activeSosId))
+                                            : _handleSOSPress,
+                                        isLoading: _isSosInProgress,
+                                        enableHaptics: settings.hapticsEnabled,
+                                        isActive: isCancelMode,
+                                        activeLabel:
+                                            settings.t('button_cancel_sos'),
+                                        activeSubLabel: _isSosInProgress
+                                            ? settings.t(
+                                                'sos_button_cancel_sending_hint')
+                                            : settings
+                                                .t('sos_button_cancel_hint'),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    settings.t('total_responders'),
-                                    style: Theme.of(context)
-                                        .textTheme.labelLarge,
-                                  ),
-                                  Text(
-                                    responderProvider.responders.length
-                                        .toString(),
-                                    style: Theme.of(context)
-                                        .textTheme.headlineSmall,
-                                  ),
-                                ],
+                              IconButton(
+                                icon: Icon(Icons.info_outline,
+                                    color: Colors.blue.shade700),
+                                tooltip: 'Info',
+                                onPressed: _showEmergencyInfoBalloon,
                               ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
+                              FilterChip(
+                                selected: _forceCriticalSeverity,
+                                label: Text(context
+                                    .read<AppSettingsProvider>()
+                                    .t('button_force_critical')),
+                                selectedColor: Colors.red.shade100,
+                                checkmarkColor: Colors.red.shade800,
+                                onSelected: (value) {
+                                  setState(() {
+                                    _forceCriticalSeverity = value;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: _emergencyContextController,
+                            minLines: 1,
+                            maxLines: 3,
+                            cursorColor: Colors.red,
+                            decoration: InputDecoration(
+                              hintText:
+                                  settings.t('hint_emergency_details_example'),
+                              filled: true,
+                              fillColor: Colors.red.shade50,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide:
+                                    BorderSide(color: Colors.red.shade200),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide(
+                                    color: Colors.red.shade300, width: 1.2),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide(
+                                    color: Colors.red.shade600, width: 2),
+                              ),
+                              errorBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: const BorderSide(color: Colors.red),
+                              ),
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    settings.t('nearby_5km'),
-                                    style: Theme.of(context)
-                                        .textTheme.labelLarge,
-                                  ),
-                                  Text(
-                                    responderProvider.nearbyResponders.length
-                                        .toString(),
-                                    style: Theme.of(context)
-                                        .textTheme.headlineSmall
-                                        ?.copyWith(
-                                      color: Colors.purple,
-                                      fontWeight: FontWeight.bold,
+                                  const Icon(Icons.warning_amber_rounded,
+                                      color: Colors.black54, size: 18),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      settings.t(
+                                          'label_emergency_details_optional'),
+                                      style:
+                                          TextStyle(color: Colors.red.shade700),
                                     ),
                                   ),
                                 ],
                               ),
-                            ],
+                              hintStyle: TextStyle(color: Colors.red.shade300),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              prefixIcon: IconButton(
+                                onPressed: _pickCameraImage,
+                                icon: const Icon(Icons.camera_alt),
+                                tooltip: settings.t('tooltip_capture_photo'),
+                              ),
+                              suffixIcon: SizedBox(
+                                width: 110,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    IconButton(
+                                      tooltip: _isRecordingClip
+                                          ? settings
+                                              .t('tooltip_stop_voice_clip')
+                                          : settings
+                                              .t('tooltip_record_voice_clip'),
+                                      onPressed: _toggleVoiceClipRecording,
+                                      icon: Icon(
+                                        _isRecordingClip
+                                            ? Icons.stop_circle
+                                            : Icons.keyboard_voice_rounded,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: _isTranscribing
+                                          ? settings
+                                              .t('tooltip_stop_voice_to_text')
+                                          : settings.t('tooltip_voice_to_text'),
+                                      onPressed: _speechReady
+                                          ? _toggleVoiceInput
+                                          : null,
+                                      icon: Icon(_isTranscribing
+                                          ? Icons.stop
+                                          : Icons.transcribe),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              ]))),
-          bottomNavigationBar: AnimatedBottomNavigationBar(
-            icons: iconList,
-            activeIndex: _bottomNavIndex,
-            gapLocation: GapLocation.none,
-            notchSmoothness: NotchSmoothness.verySmoothEdge,
-            backgroundColor: Colors.red.shade700,
-            activeColor: Colors.white,
-            inactiveColor: Colors.white70,
-            onTap: (index) {
-              setState(() {
-                _bottomNavIndex = index;
-              });
+                          if (_selectedImage != null ||
+                              (_voiceAudioPath != null &&
+                                  _voiceAudioPath!.isNotEmpty)) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    if (_selectedImage != null)
+                                      _buildAttachmentCard(
+                                        icon: Icons.image_outlined,
+                                        fileName: _selectedImage!.name.isEmpty
+                                            ? 'photo_attachment.jpg'
+                                            : _selectedImage!.name,
+                                        fileKind:
+                                            settings.t('attachment_photo'),
+                                        semanticsLabel: settings
+                                            .t('semantics_view_attached_photo'),
+                                        onOpen: _previewSelectedPhoto,
+                                        onRemove: _removePhotoAttachment,
+                                      ),
+                                    if (_selectedImage != null &&
+                                        _voiceAudioPath != null &&
+                                        _voiceAudioPath!.isNotEmpty)
+                                      const SizedBox(width: 8),
+                                    if (_voiceAudioPath != null &&
+                                        _voiceAudioPath!.isNotEmpty)
+                                      _buildAttachmentCard(
+                                        icon: Icons.graphic_eq_rounded,
+                                        fileName: 'voice_clip.wav',
+                                        fileKind:
+                                            settings.t('attachment_voice'),
+                                        semanticsLabel: settings.t(
+                                            'semantics_play_attached_voice_clip'),
+                                        onOpen: _toggleLocalVoicePreview,
+                                        onRemove: _removeVoiceAttachment,
+                                        openIcon: _isPreviewPlaying
+                                            ? Icons.stop
+                                            : Icons.play_arrow,
+                                        statusIcon: _includeVoiceClip
+                                            ? Icons.link
+                                            : Icons.link_off,
+                                        statusColor: _includeVoiceClip
+                                            ? Colors.teal.shade700
+                                            : Colors.grey.shade600,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          /*
+                      if (false)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'AI status: ${crisisProvider.latestAnalysis!.aiStatus == '"' "'gemini_success'" '"' ? '"' "'Gemini API response received'" '"' : crisisProvider.latestAnalysis!.aiStatus == '"' "'missing_api_key'" '"' ? '"' "'Gemini key missing, local fallback used'" '"' : crisisProvider.latestAnalysis!.aiStatus == '"' "'forced_offline'" '"' ? '"' "'Simulation mode forced local fallback'" '"' : crisisProvider.latestAnalysis!.aiStatus == '"' "'gemini_empty_response'" '"' ? '"' "'Gemini returned empty response, local fallback used'" '"' : crisisProvider.latestAnalysis!.aiStatus == '"' "'gemini_error'" '"' ? '"' "'Gemini call failed, local fallback used'" '"' : '"' "'Local heuristic response'" '"'}',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Colors.blueGrey.shade700,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                          ),
+                        ),*/
 
-              // Trigger same AppBar actions
-              actions[index]();
-            },
-          ),
-      );
+                          const SizedBox(height: 12),
+                        ],
+                      ),
+                    ),
+                  ])))),
+      bottomNavigationBar: FixedFooterNavigationBar(
+        activeIndex: 0,
+        showPeople: authProvider.currentUser?.isResponder == true,
+        onSosTap: () {},
+        onPeopleTap: authProvider.currentUser?.isResponder == true
+            ? _openResponderRequests
+            : showResponderOnlySnackbar,
+        onChatsTap: _openChats,
+        onMapTap: _openMap,
+        onProfileTap: _showAccountSheet,
+      ),
+    );
   }
 }
 
@@ -2364,7 +2556,7 @@ Widget _actionCard({
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.red.withOpacity(0.1),
+            color: Colors.red.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 4),
           )
@@ -2439,67 +2631,6 @@ class DashedBorderPainter extends CustomPainter {
   bool shouldRepaint(CustomPainter oldDelegate) => false;
 }
 
-Widget _styledButton({
-  required String label,
-  required IconData icon,
-  required VoidCallback onPressed,
-}) {
-  return OutlinedButton.icon(
-    onPressed: onPressed,
-    icon: Icon(icon, size: 20),
-    label: Text(label),
-    style: OutlinedButton.styleFrom(
-      padding: const EdgeInsets.all(8),
-      
-      // Rounded modern shape
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-
-      // Border style
-      side: BorderSide(
-        color: Colors.red.shade400,
-        width: 1.5,
-      ),
-
-      // Background (light red)
-      backgroundColor: Colors.red.shade50,
-
-      // Text & icon color
-      foregroundColor: Colors.red.shade700,
-
-      // Subtle elevation feel
-      shadowColor: Colors.red.withOpacity(0.2),
-      elevation: 2,
-    ),
-  );
-}
-
-
-Widget _actionChip({
-  required String label,
-  required VoidCallback onTap,
-}) {
-
-  return GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.red,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    ),
-  );
-}
-
 Widget _buildSwitchCard({
   required String title,
   String? subtitle,
@@ -2511,7 +2642,8 @@ Widget _buildSwitchCard({
     padding: const EdgeInsets.only(bottom: 10),
     child: Container(
       decoration: BoxDecoration(
-        color: value ? Colors.red.withOpacity(0.08) : Colors.grey.shade100,
+        color:
+            value ? Colors.red.withValues(alpha: 0.08) : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: value ? Colors.red : Colors.transparent,
@@ -2523,7 +2655,7 @@ Widget _buildSwitchCard({
         title: Text(title),
         subtitle: subtitle != null ? Text(subtitle) : null,
         secondary: Icon(icon, color: Colors.red),
-        activeColor: Colors.red,
+        activeThumbColor: Colors.red,
       ),
     ),
   );
@@ -2540,7 +2672,8 @@ Widget _buildCommsSwitch({
     padding: const EdgeInsets.only(bottom: 10),
     child: Container(
       decoration: BoxDecoration(
-        color: value ? Colors.red.withOpacity(0.08) : Colors.grey.shade100,
+        color:
+            value ? Colors.red.withValues(alpha: 0.08) : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: value ? Colors.red : Colors.transparent,
@@ -2552,7 +2685,7 @@ Widget _buildCommsSwitch({
         title: Text(title),
         subtitle: subtitle != null ? Text(subtitle) : null,
         secondary: Icon(icon, color: Colors.red),
-        activeColor: Colors.red,
+        activeThumbColor: Colors.red,
       ),
     ),
   );
