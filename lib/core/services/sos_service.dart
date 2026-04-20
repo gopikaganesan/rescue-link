@@ -1,7 +1,5 @@
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:provider/provider.dart';
 import 'package:torch_light/torch_light.dart';
 
 import '../providers/app_settings_provider.dart';
@@ -24,6 +22,36 @@ class SosCancellationToken {
   }
 }
 
+class SosTriggerContext {
+  const SosTriggerContext({
+    required this.authProvider,
+    required this.crisisProvider,
+    required this.emergencyRequestProvider,
+    required this.locationProvider,
+    required this.responderProvider,
+    required this.settings,
+    required this.commsProvider,
+    this.customMessage,
+    this.imageFile,
+    this.voiceAudioPath,
+    this.forceCritical = false,
+    this.cancelToken,
+  });
+
+  final AuthProvider authProvider;
+  final CrisisProvider crisisProvider;
+  final EmergencyRequestProvider emergencyRequestProvider;
+  final LocationProvider locationProvider;
+  final ResponderProvider responderProvider;
+  final AppSettingsProvider settings;
+  final CommsProvider commsProvider;
+  final String? customMessage;
+  final XFile? imageFile;
+  final String? voiceAudioPath;
+  final bool forceCritical;
+  final SosCancellationToken? cancelToken;
+}
+
 class SosService {
   static final SosService _instance = SosService._internal();
   factory SosService() => _instance;
@@ -34,20 +62,20 @@ class SosService {
   /// Core logic to trigger an SOS alert.
   /// Can be called from UI, background tasks, or deep links.
   Future<String?> triggerSos(
-    BuildContext context, {
-    String? customMessage,
-    XFile? imageFile,
-    String? voiceAudioPath,
-    bool forceCritical = false,
-    SosCancellationToken? cancelToken,
-  }) async {
-    final authProvider = context.read<AuthProvider>();
-    final crisisProvider = context.read<CrisisProvider>();
-    final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
-    final locationProvider = context.read<LocationProvider>();
-    final responderProvider = context.read<ResponderProvider>();
-    final settings = context.read<AppSettingsProvider>();
-    final commsProvider = context.read<CommsProvider>();
+    SosTriggerContext request,
+  ) async {
+    final authProvider = request.authProvider;
+    final crisisProvider = request.crisisProvider;
+    final emergencyRequestProvider = request.emergencyRequestProvider;
+    final locationProvider = request.locationProvider;
+    final responderProvider = request.responderProvider;
+    final settings = request.settings;
+    final commsProvider = request.commsProvider;
+    final customMessage = request.customMessage;
+    final imageFile = request.imageFile;
+    final voiceAudioPath = request.voiceAudioPath;
+    final forceCritical = request.forceCritical;
+    final cancelToken = request.cancelToken;
 
     // 1. Visual/Haptic Feedback (Flash)
     if (settings.sosFlashEnabled) {

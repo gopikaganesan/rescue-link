@@ -17,6 +17,7 @@ import '../core/providers/auth_provider.dart';
 import '../core/providers/comms_provider.dart';
 import '../core/providers/crisis_provider.dart';
 import '../core/providers/emergency_request_provider.dart';
+import '../core/models/user_model.dart';
 import '../core/providers/location_provider.dart';
 import '../core/providers/sos_status_provider.dart';
 import '../core/providers/responder_provider.dart';
@@ -78,10 +79,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isPreviewPlaying = false;
   bool _includeVoiceClip = false;
   bool _forceCriticalSeverity = false;
-  final bool _cloudTranscriptionEnabled = const String.fromEnvironment(
-          'USE_CLOUD_TRANSCRIPTION',
-          defaultValue: 'false') ==
-      'true';
   XFile? _selectedImage;
   String? _voiceTranscript;
   String? _voiceAudioPath;
@@ -215,6 +212,20 @@ class _HomeScreenState extends State<HomeScreen> {
     final responders = context.read<ResponderProvider>();
     final requests = context.read<EmergencyRequestProvider>();
 
+    await _checkResponderAlertsWithProviders(
+      me: me,
+      settings: settings,
+      responders: responders,
+      requests: requests,
+    );
+  }
+
+  Future<void> _checkResponderAlertsWithProviders({
+    required UserModel me,
+    required AppSettingsProvider settings,
+    required ResponderProvider responders,
+    required EmergencyRequestProvider requests,
+  }) async {
     await responders.fetchResponders();
     await requests.fetchOpenRequests();
 
@@ -244,12 +255,20 @@ class _HomeScreenState extends State<HomeScreen> {
         continue;
       }
 
+      final title = settings
+          .t('notification_new_nearby_sos_title')
+          .replaceAll('{severity}', request.severity.toUpperCase());
+      final body = settings
+          .t('notification_new_nearby_sos_body')
+          .replaceAll('{category}', settings.localizedCrisisCategory(request.category))
+          .replaceAll('{skill}', request.recommendedSkill)
+          .replaceAll('{distance}', distance.toStringAsFixed(1));
+
       _notifiedRequestIds.add(request.id);
       await NotificationService.showResponderSosAlert(
         requestId: request.id,
-        title: 'New Nearby SOS (${request.severity.toUpperCase()})',
-        body:
-            '${request.category} • ${request.recommendedSkill} • ${distance.toStringAsFixed(1)} km',
+        title: title,
+        body: body,
       );
     }
   }
@@ -395,15 +414,27 @@ class _HomeScreenState extends State<HomeScreen> {
       final commsProvider = context.read<CommsProvider>();
       final responderProvider = context.read<ResponderProvider>();
       final appSettings = context.read<AppSettingsProvider>();
+      final authProvider = context.read<AuthProvider>();
+      final crisisProvider = context.read<CrisisProvider>();
+      final emergencyRequestProvider = context.read<EmergencyRequestProvider>();
+      final locationProvider = context.read<LocationProvider>();
 
       // Execute the SOS flow via the service
       final requestId = await sosService.triggerSos(
-        context,
-        customMessage: _emergencyContextController.text.trim(),
-        imageFile: _selectedImage,
-        voiceAudioPath: _voiceAudioPath,
-        forceCritical: _forceCriticalSeverity,
-        cancelToken: _sosCancellationToken,
+        SosTriggerContext(
+          authProvider: authProvider,
+          crisisProvider: crisisProvider,
+          emergencyRequestProvider: emergencyRequestProvider,
+          locationProvider: locationProvider,
+          responderProvider: responderProvider,
+          settings: appSettings,
+          commsProvider: commsProvider,
+          customMessage: _emergencyContextController.text.trim(),
+          imageFile: _selectedImage,
+          voiceAudioPath: _voiceAudioPath,
+          forceCritical: _forceCriticalSeverity,
+          cancelToken: _sosCancellationToken,
+        ),
       );
 
       if (!mounted) return;
@@ -421,13 +452,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
         _showSOSConfirmation();
       } else if (_isSosCancelRequested) {
-        _showSnackBar('SOS send was cancelled.');
+        _showSnackBar(appSettings.t('snackbar_sos_send_cancelled'));
       } else {
-        _showSnackBar('SOS could not complete. Check permissions or network.');
+        _showSnackBar(appSettings.t('snackbar_sos_incomplete'));
       }
     } catch (e) {
       if (!mounted) return;
-      _showSnackBar('SOS error: ${e.toString()}');
+      _showSnackBar(
+        context.read<AppSettingsProvider>()
+            .t('snackbar_sos_error')
+            .replaceAll('{error}', e.toString()),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -459,12 +494,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _currentSosRequestId = null;
       });
       messenger.showSnackBar(
-        SnackBar(
-            content: Text('${settings.t('button_cancel_sos')} successful.')),
+        SnackBar(content: Text(settings.t('snackbar_cancel_sos_successful'))),
       );
     } else {
       messenger.showSnackBar(
-        SnackBar(content: Text('Unable to cancel SOS. Please try again.')),
+        SnackBar(content: Text(settings.t('snackbar_cancel_sos_failed'))),
       );
     }
   }
@@ -494,21 +528,8 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isSosInProgress = false;
     });
-    _showSnackBar('SOS send was cancelled.');
-  }
-
-  void _openSosHistory() {
-    final auth = context.read<AuthProvider>();
-    final user = auth.currentUser;
-    if (user == null) {
-      return;
-    }
-
-    SosHistoryScreen.open(
-      context,
-      currentUserId: user.id,
-      currentUserName: user.displayName,
-    );
+    final settings = context.read<AppSettingsProvider>();
+    _showSnackBar(settings.t('snackbar_sos_send_cancelled'));
   }
 
   Future<void> _pulseFlash() async {
@@ -772,7 +793,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _currentSosRequestId = null;
     dialogNavigator.pop();
     messenger.showSnackBar(
-      const SnackBar(content: Text('SOS cancelled.')),
+      SnackBar(content: Text(context.read<AppSettingsProvider>().t('snackbar_sos_cancelled'))),
     );
   }
 
@@ -794,6 +815,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     : aiStatus == 'gemini_error'
                         ? settings.t('home_ai_status_gemini_error')
                         : settings.t('home_ai_status_local_heuristic');
+
+    final String voiceStatusKey = _speechReady
+        ? 'home_emergency_info_voice_ready'
+        : 'home_emergency_info_voice_unavailable';
+    final String fallbackStatusKey = commsProvider.forceOfflineAi
+        ? 'home_emergency_info_fallback_active'
+        : 'button_powered_by_gemini';
 
     showDialog<void>(
       context: context,
@@ -820,53 +848,55 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                commsProvider.forceOfflineAi
-                    ? settings.t('status_visual_ai_disabled')
-                    : settings.t('status_visual_ai_enabled'),
+              _buildStatusRow(
+                icon: Icons.mic,
+                text: settings.t(voiceStatusKey),
                 style: infoTextStyle,
               ),
-              const SizedBox(height: 8),
-              Text(
-                settings
+              const SizedBox(height: 10),
+              _buildStatusRow(
+                icon: Icons.smart_toy,
+                text: settings
                     .t('home_ai_status')
                     .replaceAll('{status}', aiStatusLabel),
                 style: infoTextStyle,
               ),
-              const SizedBox(height: 8),
-              Text(
-                _cloudTranscriptionEnabled
-                    ? settings.t('status_transcription_cloud_enabled')
-                    : settings.t('status_transcription_ondevice_free'),
+              const SizedBox(height: 10),
+              _buildStatusRow(
+                icon: Icons.wifi_off,
+                text: settings.t(fallbackStatusKey),
                 style: infoTextStyle,
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(
-                    commsProvider.forceOfflineAi
-                        ? Icons.cloud_off
-                        : Icons.auto_awesome,
-                    color: Colors.blue.shade900,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    commsProvider.forceOfflineAi
-                        ? settings.t('status_local_fallback')
-                        : settings.t('button_powered_by_gemini'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                          color: Colors.blue.shade900,
-                        ),
-                  ),
-                ],
+              const SizedBox(height: 10),
+              _buildStatusRow(
+                icon: Icons.accessibility_new,
+                text: settings.t('home_emergency_info_accessibility_transcription'),
+                style: infoTextStyle,
               ),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildStatusRow({
+    required IconData icon,
+    required String text,
+    required TextStyle? style,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: Colors.blue.shade700),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: style,
+          ),
+        ),
+      ],
     );
   }
 
@@ -884,6 +914,53 @@ class _HomeScreenState extends State<HomeScreen> {
   void _announce(String message) {
     final view = View.of(context);
     SemanticsService.sendAnnouncement(view, message, TextDirection.ltr);
+  }
+
+  void _showAboutAppDialog() {
+    final settings = context.read<AppSettingsProvider>();
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(settings.t('home_about_app_title')),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(settings.t('home_about_app_description')),
+                const SizedBox(height: 14),
+                Text('• ${settings.t('home_about_app_feature_sos')}'),
+                const SizedBox(height: 6),
+                Text('• ${settings.t('home_about_app_feature_ai')}'),
+                const SizedBox(height: 6),
+                Text('• ${settings.t('home_about_app_feature_accessibility')}'),
+                const SizedBox(height: 6),
+                Text('• ${settings.t('home_about_app_feature_resilience')}'),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(settings.t('button_close')),
+            ),
+            TextButton(
+              onPressed: () async {
+                final uri = Uri.parse('https://github.com/gopikaganesan/rescue-link');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                } else if (mounted) {
+                  _showSnackBar(settings.t('home_about_app_github_failed'));
+                }
+              },
+              child: Text(settings.t('home_about_app_github')),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _openResponderRegistration() {
@@ -923,7 +1000,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final auth = context.read<AuthProvider>();
     final user = auth.currentUser;
     if (user == null) {
-      _showSnackBar('Please sign in to view chats.');
+      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_sign_in_to_view_chats'));
       return;
     }
 
@@ -984,7 +1061,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _logoutRegisteredUser() async {
     await context.read<AuthProvider>().logout();
     if (mounted) {
-      _showSnackBar('Signed out successfully.');
+      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_signed_out'));
     }
   }
 
@@ -1209,6 +1286,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          settings.t('accessibility_screen_reader_hint'),
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
 
@@ -1620,6 +1709,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    final snackMessage =
+        context.read<AppSettingsProvider>().t(value ? 'snackbar_responder_online' : 'snackbar_responder_offline');
+
     await responderProvider.setResponderAvailability(
       userId: userId,
       isAvailable: value,
@@ -1637,7 +1729,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (mounted) {
-      _showSnackBar(value ? 'Responder is online.' : 'Responder is offline.');
+      _showSnackBar(snackMessage);
     }
   }
 
@@ -1646,16 +1738,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _makeEmergencyCall() async {
     final uri = Uri.parse('tel:112');
+    final failureMessage =
+        context.read<AppSettingsProvider>().t('snackbar_dialer_failed');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
     } else {
-      _showSnackBar('Could not open dialer. Please call 112 manually.');
+      _showSnackBar(failureMessage);
     }
   }
 
   Future<void> _toggleVoiceInput() async {
     if (!_speechReady) {
-      _showSnackBar('Voice input is not available on this device.');
+      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_voice_input_unavailable'));
       return;
     }
 
@@ -2001,10 +2095,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         break;
       case _HomeHeaderMenuOption.aboutApp:
-        final uri = Uri.parse('https://github.com/gopikaganesan/rescue-link');
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
+        _showAboutAppDialog();
         break;
     }
   }
@@ -2019,8 +2110,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This feature is available for responders only.'),
+        SnackBar(
+          content: Text(settings.t('snackbar_responder_only_feature')),
         ),
       );
     }
@@ -2160,7 +2251,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ]));
                               })),
-                          const SizedBox(height: 12),
                           const SizedBox(height: 8),
                           Consumer<AuthProvider>(
                             builder: (context, authProvider, _) {

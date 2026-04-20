@@ -8,9 +8,6 @@ version: 1.0.0+1
 environment:
   sdk: '>=3.1.0 <4.0.0'
 
-# Enable Dart experiments
-dart: '>=3.0.0 <4.0.0'
-
 dependencies:
   flutter:
     sdk: flutter
@@ -68,4 +65,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/   # we'll create this folder later if needed
+    - assets/

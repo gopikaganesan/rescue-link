@@ -54,7 +54,8 @@ class _SOSButtonState extends State<SOSButton>
   void _handlePress() async {
     if (widget.enableHaptics) {
       try {
-        HapticFeedback.heavyImpact();
+        await HapticFeedback.heavyImpact();
+        await HapticFeedback.selectionClick();
       } catch (e) {
         // Silently fail if haptic not available
       }

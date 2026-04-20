@@ -17,18 +17,19 @@ RescueLink instantly connects people in crisis to nearby responders and resource
 
 ## ✨ Key Features
 - **Universal SOS Access**: Trigger emergencies via high-visibility **Home Widgets**, **Native Voice Commands** (Google Assistant/Siri), or physical shake/tap.
-- **Gemini AI Classification**: Crisis category, severity, and action guidance from typed text and optional image evidence. Gemini is used when a valid API key is supplied; otherwise the app falls back to local heuristic classification.
-- **Synchronized Coordination**: Dynamic matching of victims to nearby verified responders based on proximity and skill set.
-- **Voice & Attachment Support**: SOS requests support on-device speech-to-text entry, recorded voice clips, and photo evidence. Recorded audio is uploaded as an attachment; automatic transcription of uploaded voice clips is not yet wired into the current send flow.
-- **Context-Aware Assistance**: In-app AI guidance provides trusted survival videos and resources tailored to the specific crisis.
-- **Role-Aware Group Chat**: Secure real-time communication between victims and responders with granular action controls.
-- **Offline Mesh Resilience**: Simulated fallback for peer-to-peer communication when internet/cellular towers are failing.
+- **Gemini AI Classification with Local Fallback**: Crisis category, severity, recommended skill, and suggested actions are derived from typed text and optional image evidence. If Gemini is unavailable, RescueLink falls back to a local emergency heuristic and still preserves a usable rescue workflow.
+- **Synchronized Coordination**: Dynamic matching of victims to nearby verified responders based on proximity and required responder skill set.
+- **Voice & Accessibility-First Interaction**: SOS creation supports on-device speech-to-text, voice clip attachment, TTS, screen-reader announcements, and multi-language translation in chat.
+- **Context-Aware Assistance**: In-app AI guidance provides trusted survival videos, resource recommendations, and emergency suggestions tailored to the specific crisis.
+- **Role-Aware Group Chat**: Secure real-time communication between victims and responders with granular action controls and accessible message presentation.
+- **Simulated Resilience for Future Mesh**: The app includes degraded-network simulation modes for mesh/satellite fallback, with a design path to full hardware-based resilience later.
 
 ## ✅ GDG Challenge Readiness
 - Designed for rapid response use cases and clear demonstration readiness.
 - Supports one-tap emergency activation through **home widgets**, **native voice assistants**, and **deep links**.
 - Built for operational resilience with **AI-assisted classification**, **real-time responder matching**, and **clean SOS lifecycle management**.
-- Includes deployment-ready coordination patterns for **accessibility**, **voice-first emergency reporting**, and **data-backed incident tracking**.
+- Includes accessibility-first interaction patterns such as **high contrast**, **text scaling**, **voice transcription**, **screen-reader announcements**, and **language-aware chat translation**.
+- Realistic resilience is demonstrated through **offline simulation**, while the architecture remains ready for future physical mesh hardware integration.
 
 ## 🛠️ Tech Stack
 - **Flutter**: Cross-platform mobile front-end.
