@@ -17,9 +17,9 @@ RescueLink instantly connects people in crisis to nearby responders and resource
 
 ## ✨ Key Features
 - **Universal SOS Access**: Trigger emergencies via high-visibility **Home Widgets**, **Native Voice Commands** (Google Assistant/Siri), or physical shake/tap.
-- **Gemini AI Classification**: Instant analysis of crisis type, severity, and required skills from multimodal input (voice transcripts, photos, text).
+- **Gemini AI Classification**: Crisis category, severity, and action guidance from typed text and optional image evidence. Gemini is used when a valid API key is supplied; otherwise the app falls back to local heuristic classification.
 - **Synchronized Coordination**: Dynamic matching of victims to nearby verified responders based on proximity and skill set.
-- **Multimodal Evidence**: SOS requests include AI-summarized transcripts, original voice clips, and photo evidence.
+- **Voice & Attachment Support**: SOS requests support on-device speech-to-text entry, recorded voice clips, and photo evidence. Recorded audio is uploaded as an attachment; automatic transcription of uploaded voice clips is not yet wired into the current send flow.
 - **Context-Aware Assistance**: In-app AI guidance provides trusted survival videos and resources tailored to the specific crisis.
 - **Role-Aware Group Chat**: Secure real-time communication between victims and responders with granular action controls.
 - **Offline Mesh Resilience**: Simulated fallback for peer-to-peer communication when internet/cellular towers are failing.
@@ -38,8 +38,8 @@ RescueLink instantly connects people in crisis to nearby responders and resource
 - **Flutter Map**: Interactive resource mapping via OpenStreetMap.
 
 ## 📱 Developer Setup
-- `GEMINI_API_KEY`: Required for crisis analysis.
-- `USE_CLOUD_TRANSCRIPTION`: Toggle for cloud-assisted voice processing.
+- `GEMINI_API_KEY`: Required for Gemini crisis classification.
+- `USE_CLOUD_TRANSCRIPTION`: Optional flag for future cloud transcription support; current runtime uses on-device speech-to-text for voice entry.
 - `MEDIA_UPLOAD_PROVIDER`: Scalable storage for SOS evidence.
 
 See [docs/SETUP_KEYS.md](docs/SETUP_KEYS.md) for full configuration details.

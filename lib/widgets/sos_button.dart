@@ -8,12 +8,18 @@ class SOSButton extends StatefulWidget {
   final Future<void> Function() onPressed;
   final bool isLoading;
   final bool enableHaptics;
+  final bool isActive;
+  final String? activeLabel;
+  final String? activeSubLabel;
 
   const SOSButton({
     super.key,
     required this.onPressed,
     this.isLoading = false,
     this.enableHaptics = true,
+    this.isActive = false,
+    this.activeLabel,
+    this.activeSubLabel,
   });
 
   @override
@@ -67,13 +73,23 @@ class _SOSButtonState extends State<SOSButton>
   @override
   Widget build(BuildContext context) {
     final settings = context.read<AppSettingsProvider>();
+    final buttonLabel = widget.isActive
+        ? (widget.activeLabel ?? settings.t('button_cancel_sos'))
+        : settings.t('sos_button_label');
+    final buttonSublabel = widget.isActive
+        ? (widget.activeSubLabel ?? settings.t('sos_button_cancel_hint'))
+        : settings.t('sos_button_tap');
+    final gradientColors = widget.isActive
+        ? [Colors.red.shade700, Colors.red.shade900]
+        : [Colors.red.shade500, Colors.red.shade700];
+    final isTapEnabled = widget.isActive || !widget.isLoading;
     return Semantics(
       button: true,
-      enabled: !widget.isLoading,
+      enabled: isTapEnabled,
       label: settings.t('sos_button_accessibility_label'),
       hint: settings.t('sos_button_accessibility_hint'),
       child: GestureDetector(
-        onTap: widget.isLoading ? null : _handlePress,
+        onTap: isTapEnabled ? _handlePress : null,
         child: AnimatedBuilder(
           animation: _pulseAnimation,
           builder: (context, child) {
@@ -104,7 +120,7 @@ class _SOSButtonState extends State<SOSButton>
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
-                      onTap: widget.isLoading ? null : _handlePress,
+                      onTap: isTapEnabled ? _handlePress : null,
                       splashColor: Colors.red.shade900,
                       customBorder: const CircleBorder(),
                       child: AnimatedContainer(
@@ -116,10 +132,7 @@ class _SOSButtonState extends State<SOSButton>
                           gradient: LinearGradient(
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
-                            colors: [
-                              Colors.red.shade500,
-                              Colors.red.shade700,
-                            ],
+                            colors: gradientColors,
                           ),
                           border: Border.all(
                             color: Colors.red.shade900,
@@ -156,7 +169,10 @@ class _SOSButtonState extends State<SOSButton>
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Text(
-                                  settings.t('sos_button_label'),
+                                  buttonLabel,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context)
                                       .textTheme
                                       .headlineMedium
@@ -168,7 +184,10 @@ class _SOSButtonState extends State<SOSButton>
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  settings.t('sos_button_tap'),
+                                  buttonSublabel,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context)
                                       .textTheme
                                       .labelSmall

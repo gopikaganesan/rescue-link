@@ -12,6 +12,7 @@ import 'core/providers/app_settings_provider.dart';
 import 'core/providers/auth_provider.dart';
 import 'core/providers/comms_provider.dart';
 import 'core/providers/crisis_provider.dart';
+import 'core/providers/sos_status_provider.dart';
 import 'core/providers/emergency_request_provider.dart';
 import 'core/providers/location_provider.dart';
 import 'core/providers/responder_provider.dart';
@@ -108,8 +109,12 @@ class _RescueLinkAppState extends State<RescueLinkApp> {
       
       // We'll use a broadcast or just call the service if we are authenticated
       final auth = Provider.of<AuthProvider>(context, listen: false);
+      final sosStatus = Provider.of<SosStatusProvider>(context, listen: false);
       if (auth.isAuthenticated) {
-        await sosService.triggerSos(context, customMessage: message);
+        final requestId = await sosService.triggerSos(context, customMessage: message);
+        if (requestId != null) {
+          sosStatus.setActiveSos(requestId);
+        }
       }
     }
   }
@@ -235,6 +240,7 @@ class _RescueLinkAppState extends State<RescueLinkApp> {
         ChangeNotifierProvider(create: (_) => CommsProvider()),
         ChangeNotifierProvider(create: (_) => CrisisProvider()),
         ChangeNotifierProvider(create: (_) => EmergencyRequestProvider()),
+        ChangeNotifierProvider(create: (_) => SosStatusProvider()),
         ChangeNotifierProvider(create: (_) => LocationProvider()),
         ChangeNotifierProvider(create: (_) => ResponderProvider()),
       ],

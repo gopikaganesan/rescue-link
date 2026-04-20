@@ -41,8 +41,8 @@
 
 ✅ **Cancelled SOS Cleanup Flow**:
 
-- Victim-side cancelled chat delete is enabled by deployed Firestore rules
-- Cancelling/deleting chat now cleans linked SOS documents (`emergency_requests/{sosId}` and `sos_events/{sosId}`)
+- Cancelled SOS is preserved in chat history until the user explicitly deletes it
+- Explicitly deleting a cancelled chat removes linked SOS documents (`emergency_requests/{sosId}` and `sos_events/{sosId}`)
 
 ✅ **Chat List UI Consistency**:
 
@@ -64,6 +64,7 @@
 
 - Cloud assist transcription can be enabled/disabled with env flag
 - On-device transcription remains default free mode
+- Current build uploads recorded voice clips as attachments; automatic cloud transcription of those clips is not yet wired into the SOS send workflow
 
 ## Still To Do
 

@@ -48,6 +48,8 @@ Example:
 
 If no key is provided, the app uses offline heuristic classification.
 
+**Voice/audio note**: The current SOS flow supports on-device speech-to-text for typed context entry and uploads recorded voice clips as audio attachments, but it does not yet automatically transcribe uploaded voice clips with cloud speech recognition.
+
 **Simulation Note**: When testing with simulation modes enabled (tower failure, satellite device, or mesh/satellite delivery modes), emergency classification automatically uses offline heuristic only, regardless of Gemini key availability. See [docs/SIMULATION_MODES.md](SIMULATION_MODES.md) for details.
 
 ## 3) Notifications
@@ -88,7 +90,7 @@ Runtime config via `--dart-define` (or `env/dev.json`):
 - `MEDIA_UPLOAD_PROVIDER`: `firebase` (default) or `cloudinary`
 - `CLOUDINARY_CLOUD_NAME` (required when provider is `cloudinary`)
 - `CLOUDINARY_UPLOAD_PRESET` (required when provider is `cloudinary`)
-- `USE_CLOUD_TRANSCRIPTION` (`false` by default for free mode)
+- `USE_CLOUD_TRANSCRIPTION` (`false` by default for free mode; currently a future-mode flag while on-device speech-to-text handles voice entry)
 - `MEDIA_IMAGE_MAX_DIMENSION` (`1280` by default)
 - `MEDIA_IMAGE_JPEG_QUALITY` (`82` by default)
 

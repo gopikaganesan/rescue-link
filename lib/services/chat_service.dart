@@ -421,8 +421,6 @@ class ChatService {
       },
       SetOptions(merge: true),
     );
-
-    await _deleteLinkedSosRecords(safeSosId);
   }
 
   Future<void> deleteEntireChat({
@@ -490,7 +488,6 @@ class ChatService {
       }
     }
 
-    await safeDelete('emergency_requests');
     await safeDelete('sos_events');
   }
 

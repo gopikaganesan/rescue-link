@@ -14,6 +14,16 @@ import '../providers/responder_provider.dart';
 import '../services/notification_service.dart';
 import '../services/media_upload_service.dart';
 
+class SosCancellationToken {
+  bool _isCanceled = false;
+
+  bool get isCanceled => _isCanceled;
+
+  void cancel() {
+    _isCanceled = true;
+  }
+}
+
 class SosService {
   static final SosService _instance = SosService._internal();
   factory SosService() => _instance;
@@ -29,6 +39,7 @@ class SosService {
     XFile? imageFile,
     String? voiceAudioPath,
     bool forceCritical = false,
+    SosCancellationToken? cancelToken,
   }) async {
     final authProvider = context.read<AuthProvider>();
     final crisisProvider = context.read<CrisisProvider>();
@@ -48,6 +59,10 @@ class SosService {
     }
 
     // 2. Ensure Location
+    if (cancelToken?.isCanceled == true) {
+      return null;
+    }
+
     if (!locationProvider.hasLocation) {
       await locationProvider.refreshLocationStatus(fetchLocation: true);
     }
@@ -74,6 +89,10 @@ class SosService {
     if (imageFile != null) {
       imageBytes = await imageFile.readAsBytes();
       imageMimeType = _getContentTypeForName(imageFile.name);
+    }
+
+    if (cancelToken?.isCanceled == true) {
+      return null;
     }
 
     // 6. AI Crisis Analysis
@@ -104,6 +123,10 @@ class SosService {
     }
 
     String? voiceAudioUrl;
+    if (cancelToken?.isCanceled == true) {
+      return null;
+    }
+
     if (voiceAudioPath != null) {
       try {
         voiceAudioUrl = await _mediaUploadService.uploadEmergencyVoice(
@@ -111,6 +134,10 @@ class SosService {
           userId: authProvider.currentUser!.id,
         );
       } catch (_) {}
+    }
+
+    if (cancelToken?.isCanceled == true) {
+      return null;
     }
 
     // 8. Create Emergency Request

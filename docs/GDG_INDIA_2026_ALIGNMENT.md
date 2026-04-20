@@ -7,7 +7,7 @@ RescueLink is architected for the **Accelerated Emergency Response and Crisis Co
 ### 1. Immediate SOS Activation
 - **Voice and widget entry points**: Supports one-touch activation via Android home widgets and voice-driven triggers across assistant ecosystems.
 - **Deep-link based SOS bridge**: A universal `rescue-link://sos` trigger unifies activation from Google Assistant, Siri Shortcuts, Bixby Routines, and Alexa workflows.
-- **Multimodal incident capture**: Includes user text, transcribed audio, voice clips, and image attachments for richer situational assessment.
+- **Multimodal incident capture**: Includes user text, on-device voice-to-text entry, voice clip attachments, and image attachments for richer situational assessment.
 
 ### 2. Coordinated Response
 - **AI-assisted triage**: Gemini-powered classification identifies crisis category and severity in real time.

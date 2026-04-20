@@ -27,8 +27,10 @@ flowchart LR
   Victim -->|Ask AI in chat| AI
   AI -->|Context-aware guidance| Victim
 
-  Victim -->|Cancel SOS / delete cancelled chat| Firebase
-  Firebase -->|Cleanup linked SOS + chat artifacts| Victim
+  Victim -->|Cancel SOS| Firebase
+  Firebase -->|Mark request cancelled, preserve history| Victim
+  Victim -->|Delete cancelled chat| Firebase
+  Firebase -->|Remove chat artifacts on explicit delete| Victim
 
   Victim -->|Call emergency number| Emergency
 ```
@@ -54,8 +56,8 @@ flowchart TD
   I --> N{SOS cancelled?}
   N -- No --> O[Normal closure]
   N -- Yes --> P[Mark SOS as cancelled]
-  P --> Q[Delete linked emergency docs and chat artifacts]
-  Q --> R[Retain cancelled chat until user removes it]
+  P --> Q[Preserve cancelled chat history]
+  Q --> R[Keep record until user explicitly deletes it]
 ```
 
 ## 3) Runtime Architecture Diagram
@@ -123,4 +125,4 @@ flowchart TB
 
 - AI video suggestions are restricted to trusted IDs and filtered by prompt relevance.
 - AI chat rendering removes raw YouTube URL lines when preview cards are shown.
-- Cancelled SOS cleanup removes linked SOS records and supports cancelled chat deletion flow.
+- Cancelled SOS is marked cancelled and preserved in history; chat artifacts remain until the user explicitly deletes a cancelled chat.
