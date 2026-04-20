@@ -7,22 +7,22 @@ RescueLink is architected for the **Accelerated Emergency Response and Crisis Co
 ### 1. Immediate SOS Activation
 - **Voice and widget entry points**: Supports one-touch activation via Android home widgets and voice-driven triggers across assistant ecosystems.
 - **Deep-link based SOS bridge**: A universal `rescue-link://sos` trigger unifies activation from Google Assistant, Siri Shortcuts, Bixby Routines, and Alexa workflows.
-- **Multimodal incident capture**: Includes user text, on-device voice-to-text entry, voice clip attachments, and image attachments for richer situational assessment.
+- **Multimodal incident capture**: Includes user text, on-device speech-to-text for SOS creation, voice clip attachments, photo evidence, and optional image-backed incident analysis.
 
 ### 2. Coordinated Response
-- **AI-assisted triage**: Gemini-powered classification identifies crisis category and severity in real time.
+- **AI-assisted triage**: Gemini-powered classification identifies crisis category, severity, recommended skill, and relevant actions in real time.
 - **Responder skill matching**: Matches active incidents to responders based on proximity and required skill sets.
-- **Synchronized collaboration**: Victims and responders share a secure, role-aware group chat for coordinated action.
+- **Synchronized collaboration**: Victims and responders share a secure, role-aware group chat for coordinated action, with voice transcripts and translated messages for context.
 
 ### 3. Fragmentation and Resilience
 - **Universal communication bridge**: Deep links and widget triggers reduce dependency on a single interaction channel.
-- **Offline simulation readiness**: The app includes simulated fallback behavior for degraded network scenarios.
+- **Offline simulation readiness**: The app includes degraded-network simulation modes for mesh and satellite fallback, with a clear future path to hardware-backed peer-to-peer resilience.
 - **Clean lifecycle management**: SOS cancellation triggers consistent cleanup of linked emergency and chat records.
 
 ## Accessibility and Inclusion
 - **Hands-free usage**: Voice-first flows reduce friction during emergencies.
-- **High-visibility widget**: Large call-to-action widgets improve accessibility for all users.
-- **Multilingual support**: Built around language-aware classification and localized labels.
+- **Accessible emergency UX**: High contrast, adjustable text sizing, screen-reader announcements, and voice-triggered input make the app usable for diverse users.
+- **Multilingual support**: Built around language-aware classification, sentence translation, and localized labels, including translation in chat and AI normalization of local scripts.
 - **Visual/haptic confirmation**: Complements UI feedback with physical cues for SOS acknowledgment.
 
 ## Documentation and Delivery Evidence

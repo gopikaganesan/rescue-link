@@ -1037,6 +1037,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                               ),
                                               TextButton(
                                                 onPressed: () async {
+                                                  final messenger =
+                                                      ScaffoldMessenger.of(this.context);
                                                   Navigator.pop(context);
                                                   final deleted = await _chatService
                                                       .deleteMessageWithMedia(
@@ -1048,8 +1050,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                                   if (!mounted) {
                                                     return;
                                                   }
-                                                  ScaffoldMessenger.of(this.context)
-                                                      .showSnackBar(
+                                                  messenger.showSnackBar(
                                                     SnackBar(
                                                       content: Text(
                                                         deleted
@@ -3106,7 +3107,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       return;
     }
 
-    final messenger = ScaffoldMessenger.of(context);
     final reviewDocId = '${widget.currentUserId}_$responderUid';
     final directReviewRef = FirebaseFirestore.instance
         .collection('responder_reviews')
@@ -3142,6 +3142,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     if (!mounted) {
       return;
     }
+
+    final messenger = ScaffoldMessenger.of(context);
 
     await showDialog<void>(
       context: context,
@@ -3209,7 +3211,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                       });
                     }
                     if (mounted) {
-                      messenger.showSnackBar(
+                      ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('Unable to delete review: $e')),
                       );
                     }
@@ -3274,7 +3276,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                     }
                     Navigator.pop(ctx);
                     if (mounted) {
-                      messenger.showSnackBar(
+                      ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('Review saved for $responderName')),
                       );
                     }

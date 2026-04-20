@@ -17,6 +17,32 @@ class SosHistoryScreen extends StatelessWidget {
   final String currentUserId;
   final String currentUserName;
 
+  String _translateSeverityLabel(AppSettingsProvider settings, String severity) {
+    final normalized = severity.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return settings.t('severity_unknown');
+    }
+
+    final key = 'severity_$normalized';
+    final translated = settings.t(key);
+    if (translated != key) {
+      return translated;
+    }
+
+    return severity.toUpperCase();
+  }
+
+  String _translateCategoryLabel(AppSettingsProvider settings, String category) {
+    final normalized = category.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final key = 'category_$normalized';
+    final translated = settings.t(key);
+    if (translated != key) {
+      return translated;
+    }
+
+    return category;
+  }
+
   static Future<void> open(
     BuildContext context, {
     required String currentUserId,
@@ -124,19 +150,26 @@ class SosHistoryScreen extends StatelessWidget {
               final formattedTime = MaterialLocalizations.of(context)
                   .formatFullDate(createdAt)
                   .toString();
+              final category = (data['category'] as String?)?.trim();
               final severity =
                   ((data['severity'] as String?) ?? 'low').toLowerCase();
+              final severityLabel =
+                  _translateSeverityLabel(settings, severity);
               final severityValue = severity.toUpperCase();
               final severityColor = severityValue == 'CRITICAL'
                   ? Colors.red.shade700
                   : severityValue == 'HIGH'
                       ? Colors.orange.shade700
                       : Colors.green.shade700;
+              final categoryLabel = category == null || category.isEmpty
+                  ? settings.t('status_unknown')
+                  : _translateCategoryLabel(settings, category);
+              final isActiveStatus = status == 'open' || status == 'active';
               final statusLabelText = status == 'cancelled'
                   ? settings.t('status_cancelled')
-                  : status == 'open'
+                  : isActiveStatus
                       ? settings.t('status_active')
-                      : status.toUpperCase();
+                      : settings.t('status_unknown');
 
               return ListTile(
                 contentPadding:
@@ -156,7 +189,7 @@ class SosHistoryScreen extends StatelessWidget {
                       runSpacing: 8,
                       children: [
                         Chip(
-                          label: Text(severityValue),
+                          label: Text(severityLabel),
                           backgroundColor: severityColor.withAlpha(38),
                           labelStyle: TextStyle(
                             color: severityColor,
@@ -180,6 +213,8 @@ class SosHistoryScreen extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text('${settings.t('label_case_id')}: $sosId'),
                     const SizedBox(height: 4),
+                    Text('${settings.t('category_label')}: $categoryLabel'),
+                    Text('${settings.t('severity_label')}: $severityLabel'),
                     Text(formattedTime),
                   ],
                 ),
@@ -196,8 +231,8 @@ class SosHistoryScreen extends StatelessWidget {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(cancelled
-                                  ? '${settings.t('button_cancel_sos')} successful.'
-                                  : 'Failed to cancel SOS.'),
+                                  ? settings.t('snackbar_cancel_sos_successful')
+                                  : settings.t('snackbar_cancel_sos_failed')),
                             ),
                           );
                         },
@@ -233,6 +268,9 @@ class SosHistoryScreen extends StatelessWidget {
     final messenger = ScaffoldMessenger.of(context);
     final chatDoc =
         await FirebaseFirestore.instance.collection('chats').doc(sosId).get();
+    if (!context.mounted) {
+      return;
+    }
     final chatExists = chatDoc.exists;
     final confirmed = await showDialog<bool>(
           context: context,
@@ -311,9 +349,12 @@ class SosHistoryScreen extends StatelessWidget {
     final summary = (data['summary'] as String?)?.trim() ??
         (data['originalMessage'] as String?)?.trim() ??
         settings.t('status_no_sos_message_available');
-    final category =
-        (data['category'] as String?)?.trim() ?? settings.t('category_label');
-    final severity = (data['severity'] as String?)?.trim() ?? 'Unknown';
+    final category = (data['category'] as String?)?.trim();
+    final categoryLabel = category == null || category.isEmpty
+        ? settings.t('status_unknown')
+        : _translateCategoryLabel(settings, category);
+    final severity = (data['severity'] as String?)?.trim();
+    final severityLabel = _translateSeverityLabel(settings, severity ?? 'unknown');
     final address = (data['address'] as String?)?.trim();
     final location = address ??
         ((data['latitude'] as num?) != null &&
@@ -323,11 +364,11 @@ class SosHistoryScreen extends StatelessWidget {
 
     final chatDoc =
         await FirebaseFirestore.instance.collection('chats').doc(sosId).get();
-    final chatExists = chatDoc.exists;
-
     if (!context.mounted) {
       return;
     }
+    final chatExists = chatDoc.exists;
+    final isActiveStatus = status == 'open' || status == 'active';
 
     await showDialog<void>(
       context: context,
@@ -347,10 +388,9 @@ class SosHistoryScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text('${settings.t('label_case_id')}: $sosId'),
                 Text(
-                    '${settings.t('status_label')}: ${status == 'cancelled' ? settings.t('status_cancelled') : status == 'open' ? settings.t('status_active') : status.toUpperCase()}'),
-                Text('${settings.t('category_label')}: $category'),
-                Text(
-                    '${settings.t('severity_label')}: ${severity.toUpperCase()}'),
+                    '${settings.t('status_label')}: ${status == 'cancelled' ? settings.t('status_cancelled') : isActiveStatus ? settings.t('status_active') : settings.t('status_unknown')}'),
+                Text('${settings.t('category_label')}: $categoryLabel'),
+                Text('${settings.t('severity_label')}: $severityLabel'),
                 if (location != null) ...[
                   const SizedBox(height: 8),
                   Text('${settings.t('label_location')}: $location'),
@@ -369,7 +409,7 @@ class SosHistoryScreen extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(top: 12.0),
                     child: Text(
-                      'Chat is not available right now, but the SOS summary is preserved.',
+                      settings.t('status_chat_summary_preserved'),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
@@ -390,8 +430,8 @@ class SosHistoryScreen extends StatelessWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(cancelled
-                          ? "${settings.t('button_cancel_sos')} successful."
-                          : 'Failed to cancel SOS.'),
+                          ? settings.t('snackbar_cancel_sos_successful')
+                          : settings.t('snackbar_cancel_sos_failed')),
                     ),
                   );
                 },
