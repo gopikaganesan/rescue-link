@@ -718,7 +718,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _openMap();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade600,
+              backgroundColor: Colors.red.shade600,
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.map),
@@ -835,11 +835,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return AlertDialog(
           title: Row(
             children: [
-              const Icon(Icons.info_outline, color: Colors.blue),
-              const SizedBox(width: 8),
               Expanded(child: Text(settings.t('home_emergency_info_title'))),
               IconButton(
-                icon: const Icon(Icons.close),
+                icon: const Icon(Icons.close,color: Colors.red),
                 onPressed: () => Navigator.of(dialogContext).pop(),
               ),
             ],
@@ -888,7 +886,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: Colors.blue.shade700),
+        Icon(icon, size: 18, color: Colors.red.shade700),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -919,48 +917,126 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showAboutAppDialog() {
     final settings = context.read<AppSettingsProvider>();
 
+Widget _featureItem(IconData icon, String text, Color color) {
+  return Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: color.withAlpha(30),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
     showDialog<void>(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
         return AlertDialog(
-          title: Text(settings.t('home_about_app_title')),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(settings.t('home_about_app_description')),
-                const SizedBox(height: 14),
-                Text('• ${settings.t('home_about_app_feature_sos')}'),
-                const SizedBox(height: 6),
-                Text('• ${settings.t('home_about_app_feature_ai')}'),
-                const SizedBox(height: 6),
-                Text('• ${settings.t('home_about_app_feature_accessibility')}'),
-                const SizedBox(height: 6),
-                Text('• ${settings.t('home_about_app_feature_resilience')}'),
-              ],
-            ),
+  backgroundColor: Colors.white,
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(16),
+  ),
+
+  title: Row(
+    children: [
+      Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(Icons.info_outline, color: Colors.blue.shade700),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Text(
+          settings.t('home_about_app_title'),
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
+    ],
+  ),
+
+  content: SingleChildScrollView(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 🔹 Description
+        Text(
+          settings.t('home_about_app_description'),
+          style: TextStyle(
+            color: Colors.grey.shade700,
+            height: 1.4,
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(settings.t('button_close')),
-            ),
-            TextButton(
-              onPressed: () async {
-                final uri = Uri.parse('https://github.com/gopikaganesan/rescue-link');
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                } else if (mounted) {
-                  _showSnackBar(settings.t('home_about_app_github_failed'));
-                }
-              },
-              child: Text(settings.t('home_about_app_github')),
-            ),
-          ],
-        );
+        ),
+
+        const SizedBox(height: 16),
+
+        // 🔹 Features
+        _featureItem(Icons.warning_amber_rounded,
+            settings.t('home_about_app_feature_sos'), Colors.red),
+
+        _featureItem(Icons.smart_toy,
+            settings.t('home_about_app_feature_ai'), Colors.blue),
+
+        _featureItem(Icons.accessibility_new,
+            settings.t('home_about_app_feature_accessibility'), Colors.green),
+
+        _featureItem(Icons.shield,
+            settings.t('home_about_app_feature_resilience'), Colors.orange),
+      ],
+    ),
+  ),
+
+  actionsPadding:
+      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+
+  actions: [
+    TextButton(
+      onPressed: () => Navigator.of(dialogContext).pop(),
+      child: Text(
+        settings.t('button_close'),
+        style: TextStyle(color: Colors.grey.shade700),
+      ),
+    ),
+
+    FilledButton.icon(
+      icon: const Icon(Icons.open_in_new, size: 18),
+      onPressed: () async {
+        final uri = Uri.parse(
+            'https://github.com/gopikaganesan/rescue-link');
+
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri,
+              mode: LaunchMode.externalApplication);
+        } else if (mounted) {
+          _showSnackBar(
+              settings.t('home_about_app_github_failed'));
+        }
+      },
+      label: Text(settings.t('home_about_app_github')),
+    ),
+  ],
+);
       },
     );
+
+    
   }
 
   void _openResponderRegistration() {
@@ -1147,12 +1223,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 horizontal: 16, vertical: 14),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? Colors.blue.withValues(alpha: 0.1)
+                                  ? Colors.red.withValues(alpha: 0.1)
                                   : Colors.grey.shade100,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
                                 color: isSelected
-                                    ? Colors.blue
+                                    ? Colors.red
                                     : Colors.transparent,
                               ),
                             ),
@@ -2118,7 +2194,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(settings.t('app_title')),
+        title: Text(settings.t('app_title'),style:TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         elevation: 0,
         backgroundColor: Colors.red.shade700,
@@ -2131,9 +2207,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.language,
                 child: Row(
                   children: [
-                    const Icon(Icons.language, color: Colors.black87),
+                    const Icon(Icons.language, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('home_select_language')),
+                    Text(settings.t('home_select_language'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2141,9 +2217,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.accessibility,
                 child: Row(
                   children: [
-                    const Icon(Icons.accessibility_new, color: Colors.black87),
+                    const Icon(Icons.accessibility_new, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('title_accessibility')),
+                    Text(settings.t('title_accessibility'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2151,9 +2227,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.commsSimulation,
                 child: Row(
                   children: [
-                    const Icon(Icons.wifi_tethering, color: Colors.black87),
+                    const Icon(Icons.wifi_tethering, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('comms_simulation_title')),
+                    Text(settings.t('comms_simulation_title'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2161,9 +2237,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.viewSosHistory,
                 child: Row(
                   children: [
-                    const Icon(Icons.history, color: Colors.black87),
+                    const Icon(Icons.history, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('button_view_sos_history')),
+                    Text(settings.t('button_view_sos_history'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2171,9 +2247,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.aboutApp,
                 child: Row(
                   children: [
-                    const Icon(Icons.info_outline, color: Colors.black87),
+                    const Icon(Icons.info_outline, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('button_about_app')),
+                    Text(settings.t('button_about_app'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2344,7 +2420,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               IconButton(
                                 icon: Icon(Icons.info_outline,
-                                    color: Colors.blue.shade700),
+                                    color: Colors.red.shade700),
                                 tooltip: 'Info',
                                 onPressed: _showEmergencyInfoBalloon,
                               ),
@@ -2364,96 +2440,84 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                           const SizedBox(height: 8),
-                          TextField(
-                            controller: _emergencyContextController,
-                            minLines: 1,
-                            maxLines: 3,
-                            cursorColor: Colors.red,
-                            decoration: InputDecoration(
-                              hintText:
-                                  settings.t('hint_emergency_details_example'),
-                              filled: true,
-                              fillColor: Colors.red.shade50,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide:
-                                    BorderSide(color: Colors.red.shade200),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(
-                                    color: Colors.red.shade300, width: 1.2),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(
-                                    color: Colors.red.shade600, width: 2),
-                              ),
-                              errorBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: const BorderSide(color: Colors.red),
-                              ),
-                              label: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.warning_amber_rounded,
-                                      color: Colors.black54, size: 18),
-                                  const SizedBox(width: 6),
-                                  Flexible(
-                                    child: Text(
-                                      settings.t(
-                                          'label_emergency_details_optional'),
-                                      style:
-                                          TextStyle(color: Colors.red.shade700),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              hintStyle: TextStyle(color: Colors.red.shade300),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              prefixIcon: IconButton(
-                                onPressed: _pickCameraImage,
-                                icon: const Icon(Icons.camera_alt),
-                                tooltip: settings.t('tooltip_capture_photo'),
-                              ),
-                              suffixIcon: SizedBox(
-                                width: 110,
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    IconButton(
-                                      tooltip: _isRecordingClip
-                                          ? settings
-                                              .t('tooltip_stop_voice_clip')
-                                          : settings
-                                              .t('tooltip_record_voice_clip'),
-                                      onPressed: _toggleVoiceClipRecording,
-                                      icon: Icon(
-                                        _isRecordingClip
-                                            ? Icons.stop_circle
-                                            : Icons.keyboard_voice_rounded,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: _isTranscribing
-                                          ? settings
-                                              .t('tooltip_stop_voice_to_text')
-                                          : settings.t('tooltip_voice_to_text'),
-                                      onPressed: _speechReady
-                                          ? _toggleVoiceInput
-                                          : null,
-                                      icon: Icon(_isTranscribing
-                                          ? Icons.stop
-                                          : Icons.transcribe),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
+                          Container(
+  padding: const EdgeInsets.all(10),
+  decoration: BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(20),
+    border: Border.all(color: Colors.red.shade200),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.05),
+        blurRadius: 8,
+        offset: const Offset(0, 3),
+      ),
+    ],
+  ),
+  child: Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+
+      // 🔴 TOP INPUT FIELD
+      TextField(
+        controller: _emergencyContextController,
+        minLines: 1,
+        maxLines: 3,
+        cursorColor: Colors.red,
+        decoration: InputDecoration(
+          hintText: settings.t('hint_emergency_details_example'),
+          hintStyle: TextStyle(color: Colors.red.shade300),
+
+          filled: true,
+          fillColor: Colors.red.shade50,
+
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
+
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 12,
+          ),
+
+          // 🎤 Voice-to-text
+          suffixIcon: IconButton(
+            icon: Icon(
+              _isTranscribing ? Icons.stop : Icons.mic_none,
+              color: Colors.red.shade700,
+            ),
+            onPressed: _speechReady ? _toggleVoiceInput : null,
+          ),
+        ),
+      ),
+
+      const SizedBox(height: 8),
+
+      // ⚫ BOTTOM ACTION ROW
+      Row(
+        children: [
+
+          _actionBtn(
+            icon: Icons.camera_alt_outlined,
+            onTap: _pickCameraImage,
+          ),
+
+          const SizedBox(width: 8),
+
+          _actionBtn(
+            icon: _isRecordingClip
+                ? Icons.stop_circle
+                : Icons.keyboard_voice_rounded,
+            onTap: _toggleVoiceClipRecording,
+            isActive: _isRecordingClip,
+          ),
+        ],
+      ),
+    ],
+  ),
+),
+                        
                           if (_selectedImage != null ||
                               (_voiceAudioPath != null &&
                                   _voiceAudioPath!.isNotEmpty)) ...[
@@ -2565,21 +2629,15 @@ Widget _actionCard({
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
             icon,
             size: 32,
             color: Colors.red.shade700,
           ),
           const SizedBox(height: 10),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.red.shade600,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
           Text(
             value,
             style: TextStyle(
@@ -2588,6 +2646,17 @@ Widget _actionCard({
               fontWeight: FontWeight.bold,
             ),
           ),
+            ]
+          ) ,
+          const SizedBox(height: 6),
+          Text(
+            title,
+            style: TextStyle(
+              color: Colors.red.shade600,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          
         ],
       ),
     ),
@@ -2630,6 +2699,27 @@ class DashedBorderPainter extends CustomPainter {
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => false;
 }
+
+Widget _actionBtn({
+  required IconData icon,
+  required VoidCallback onTap,
+  bool isActive = false,
+}) {
+  return Container(
+    height: 42,
+    width: 42,
+    decoration: BoxDecoration(
+      color: isActive ? Colors.red.shade600 : Colors.black,
+      shape: BoxShape.circle,
+    ),
+    child: IconButton(
+      icon: Icon(icon, size: 20),
+      color: Colors.white,
+      onPressed: onTap,
+    ),
+  );
+}
+
 
 Widget _buildSwitchCard({
   required String title,

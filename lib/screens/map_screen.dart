@@ -11,6 +11,7 @@ import '../core/models/responder_model.dart';
 import 'responder_chat_list_screen.dart';
 import 'victim_chat_list_screen.dart';
 import 'responder_profile_screen.dart';
+import 'dart:io';
 
 class MapScreen extends StatefulWidget {
   final double? targetLatitude;
@@ -76,19 +77,25 @@ class _MapScreenState extends State<MapScreen> {
       widget.targetLatitude != null && widget.targetLongitude != null;
 
   Future<void> _openExternalNavigation() async {
+
     if (!_hasTarget) {
       return;
     }
 
     final targetLat = widget.targetLatitude!;
     final targetLng = widget.targetLongitude!;
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=$targetLat,$targetLng&travelmode=driving',
-    );
+    Uri uri;
 
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+    if (Platform.isAndroid) {
+    uri = Uri.parse("geo:$targetLat,$targetLng?q=$targetLat,$targetLng");
+  } else {
+    uri = Uri.parse("https://maps.google.com/?q=$targetLat,$targetLng");
+  }
+
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri);
+  }else{
+  }
   }
 
   /// Animate camera to user location
@@ -219,63 +226,140 @@ class _MapScreenState extends State<MapScreen> {
         builder: (context, locationProvider, responderProvider, _) {
           if (!locationProvider.hasLocation) {
             return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.location_off, size: 50),
-                  const SizedBox(height: 16),
-                  Text(
-                    settings.t('map_location_not_available'),
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                  if (locationProvider.error != null) ...[
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        locationProvider.error!,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: Colors.grey[700]),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: () async {
-                          await locationProvider.openLocationSettings();
-                        },
-                        icon: const Icon(Icons.gps_fixed),
-                        label: Text(settings.t('map_turn_on_location')),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          await locationProvider.openPermissionSettings();
-                        },
-                        icon: const Icon(Icons.app_settings_alt),
-                        label: Text(settings.t('map_grant_permission')),
-                      ),
-                      TextButton.icon(
-                        onPressed: () async {
-                          await locationProvider.refreshLocationStatus(
-                            fetchLocation: true,
-                          );
-                        },
-                        icon: const Icon(Icons.refresh),
-                        label: Text(settings.t('map_retry')),
-                      ),
-                    ],
-                  ),
-                ],
+  child: Padding(
+    padding: const EdgeInsets.all(20),
+    child: Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+
+          // 📍 Icon with background
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.location_off,
+              size: 40,
+              color: Colors.orange,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // 📝 Title
+          Text(
+            settings.t('map_location_not_available'),
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+
+          // ⚠️ Error message
+          if (locationProvider.error != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(12),
               ),
-            );
+              child: Text(
+                locationProvider.error!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Colors.red.shade700),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 20),
+
+          // 🔘 Primary Action
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                await locationProvider.openLocationSettings();
+              },
+              icon: const Icon(Icons.gps_fixed),
+              label: Text(settings.t('map_turn_on_location')),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          // 🔘 Secondary Actions (row)
+          Row(
+            children: [
+
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await locationProvider.openPermissionSettings();
+                  },
+                  icon: const Icon(Icons.app_settings_alt),
+                  label: Text(settings.t('map_grant_permission')),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 10),
+
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: () async {
+                    await locationProvider.refreshLocationStatus(
+                      fetchLocation: true,
+                    );
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: Text(settings.t('map_retry')),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: Colors.grey.shade300),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
           }
 
           return Stack(

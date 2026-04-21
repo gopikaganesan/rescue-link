@@ -8,8 +8,12 @@
 .history
 .idea/
 *.iml
-
-
+.env
+.env.example
+.claude/
+.dart_tool/
+.vscode/
+google-services.json
 
 # Flutter repo-specific
 /bin/cache/

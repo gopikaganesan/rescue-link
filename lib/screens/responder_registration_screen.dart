@@ -25,14 +25,19 @@ class _ResponderRegistrationScreenState
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
 
-  String _selectedSkill = 'Medical Emergency';
+  String _selectedSkill = 'General Support';
   String _responderType = 'Community Volunteer';
   bool _isSubmitting = false;
   PlatformFile? _selectedFile;
   String? _uploadedDocumentUrl;
   bool _isUploadingDocument = false;
+  bool _isInfoExpanded = false;
 
   static const List<String> _skills = <String>[
+    
+    'Food & Water Supply',
+    'Essential Medicines',
+    'General Support',
     'Medical Emergency',
     'Fire & Rescue',
     'Search & Rescue',
@@ -40,12 +45,9 @@ class _ResponderRegistrationScreenState
     'Women Safety',
     'Child Safety',
     'Shelter & Evacuation',
-    'Food & Water Supply',
-    'Essential Medicines',
     'Mobility Support',
     'Communication Relay',
     'Logistics & Transport',
-    'General Support',
   ];
 
   static const List<String> _responderTypes = <String>[
@@ -313,230 +315,327 @@ class _ResponderRegistrationScreenState
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Form(
-            key: _formKey,
-            child: ListView(
-              children: [
-                Text(
+  key: _formKey,
+  child: ListView(
+    padding: const EdgeInsets.all(16),
+    children: [
+
+      Container(
+  decoration: BoxDecoration(
+    color: Colors.red.shade50,
+    borderRadius: BorderRadius.circular(16),
+    border: Border.all(color: Colors.red.shade100),
+  ),
+  child: Column(
+    children: [
+
+      InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          setState(() {
+            _isInfoExpanded = !_isInfoExpanded;
+          });
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+
+              // 🔹 Info Icon
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade100,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.info_outline,
+                  size: 20,
+                  color: Colors.red,
+                ),
+              ),
+
+              const SizedBox(width: 12),
+
+              // 🔹 Title
+              Expanded(
+                child: Text(
                   settings.t('responder_registration_headline'),
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  settings.t('responder_registration_description'),
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  settings.t('responder_registration_profile_help'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  settings.t('responder_registration_verification_note'),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.grey[700],
-                      ),
-                ),
-                const SizedBox(height: 20),
-                TextFormField(
-                  controller: _nameController,
-                  decoration: InputDecoration(
-                    labelText: settings.t('label_full_name'),
-                    border: const OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return settings.t('error_please_enter_name');
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(
-                    labelText: settings.t('label_phone_number'),
-                    border: const OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return settings.t('error_please_enter_phone');
-                    }
-                    if (value.trim().length < 8) {
-                      return settings.t('error_valid_phone_number');
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedSkill,
-                  decoration: InputDecoration(
-                    labelText: settings.t('label_primary_skill'),
-                    border: const OutlineInputBorder(),
-                  ),
-                  items: _skills
-                      .map(
-                        (skill) => DropdownMenuItem<String>(
-                          value: skill,
-                          child: Text(_skillLabel(context, skill)),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _selectedSkill = value;
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _responderType,
-                  decoration: InputDecoration(
-                    labelText: settings.t('label_responder_type'),
-                    border: const OutlineInputBorder(),
-                  ),
-                  items: _responderTypes
-                      .map(
-                        (type) => DropdownMenuItem<String>(
-                          value: type,
-                          child: Text(_responderTypeLabel(context, type)),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _responderType = value;
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(height: 20),
-                // ID Document Upload Section
-                Text(
-                  settings.t('label_id_upload'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  settings.t('responder_registration_id_description'),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.grey[600],
+              ),
+
+              // 🔹 Arrow
+              AnimatedRotation(
+                turns: _isInfoExpanded ? 0.5 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: const Icon(Icons.keyboard_arrow_down),
+              ),
+            ],
+          ),
+        ),
+      ),
+
+      // 🔽 Expandable Content
+      AnimatedCrossFade(
+        duration: const Duration(milliseconds: 250),
+        crossFadeState: _isInfoExpanded
+            ? CrossFadeState.showFirst
+            : CrossFadeState.showSecond,
+        firstChild: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(settings.t('responder_registration_description')),
+              const SizedBox(height: 6),
+              Text(
+                settings.t('responder_registration_profile_help'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                settings.t('responder_registration_verification_note'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey[700],
+                    ),
+              ),
+            ],
+          ),
+        ),
+        secondChild: const SizedBox.shrink(),
+      ),
+    ],
+  ),
+),
+
+
+      const SizedBox(height: 24),
+
+      // 🔹 Name Field
+      Padding(
+        padding:EdgeInsets.only(bottom: 2,left: 10),
+        child:Text(settings.t('label_full_name'),style: TextStyle(fontWeight: FontWeight.bold,color: Colors.red[300]),)
+      ),
+      TextFormField(
+        controller: _nameController,
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        validator: (value) {
+          if (value == null || value.trim().isEmpty) {
+            return settings.t('error_please_enter_name');
+          }
+          return null;
+        },
+      ),
+
+      const SizedBox(height: 16),
+      Padding(
+        padding:EdgeInsets.only(bottom: 2,left: 10),
+        child:Text(settings.t('label_phone_number'),style: TextStyle(fontWeight: FontWeight.bold,color: Colors.red[300]),)
+      ),
+      // 🔹 Phone Field
+      TextFormField(
+        controller: _phoneController,
+        keyboardType: TextInputType.phone,
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        validator: (value) {
+          if (value == null || value.trim().isEmpty) {
+            return settings.t('error_please_enter_phone');
+          }
+          if (value.trim().length < 8) {
+            return settings.t('error_valid_phone_number');
+          }
+          return null;
+        },
+      ),
+
+      const SizedBox(height: 16),
+      Padding(
+        padding:EdgeInsets.only(bottom: 2,left: 10),
+        child:Text(settings.t('label_primary_skill'),style: TextStyle(fontWeight: FontWeight.bold,color: Colors.red[300]),)
+      ),
+      // 🔹 Skill Dropdown
+      DropdownButtonFormField<String>(
+        value: _selectedSkill,
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        items: _skills.map((skill) {
+          return DropdownMenuItem(
+            value: skill,
+            child: Text(_skillLabel(context, skill)),
+          );
+        }).toList(),
+        onChanged: (value) {
+          if (value != null) {
+            setState(() => _selectedSkill = value);
+          }
+        },
+      ),
+
+      const SizedBox(height: 16),
+      Padding(
+        padding:EdgeInsets.only(bottom: 2,left: 10),
+        child:Text(settings.t('label_responder_type'),style: TextStyle(fontWeight: FontWeight.bold,color: Colors.red[300]),)
+      ),
+      // 🔹 Responder Type
+      DropdownButtonFormField<String>(
+        value: _responderType,
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        items: _responderTypes.map((type) {
+          return DropdownMenuItem(
+            value: type,
+            child: Text(_responderTypeLabel(context, type)),
+          );
+        }).toList(),
+        onChanged: (value) {
+          if (value != null) {
+            setState(() => _responderType = value);
+          }
+        },
+      ),
+
+      const SizedBox(height: 24),
+
+      // 🔹 Upload Section (Modern Card)
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: Colors.grey.shade50,
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              settings.t('label_id_upload'),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              settings.t('responder_registration_id_description'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+
+            if (_uploadedDocumentUrl != null)
+              Row(
+                children: [
+                  const Icon(Icons.verified, color: Colors.green),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _selectedFile?.name ??
+                          settings.t('label_document_name'),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: _clearDocument,
+                  )
+                ],
+              )
+            else
+              Column(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _pickIdDocument,
+                    icon: const Icon(Icons.attach_file),
+                    label:
+                        Text(settings.t('button_select_document')),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                ),
-                const SizedBox(height: 12),
-                if (_uploadedDocumentUrl != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      border: Border.all(color: Colors.green),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.check_circle, color: Colors.green),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(settings.t('document_uploaded_successfully')),
-                              Text(
-                                _selectedFile?.name ?? settings.t('label_document_name'),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: _clearDocument,
-                        ),
-                      ],
                     ),
                   ),
-                ] else if (_selectedFile != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      border: Border.all(color: Colors.blue),
-                      borderRadius: BorderRadius.circular(8),
+                  const SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    onPressed: _isUploadingDocument
+                        ? null
+                        : _uploadIdDocument,
+                    icon: _isUploadingDocument
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2),
+                          )
+                        : const Icon(Icons.cloud_upload),
+                    label: Text(
+                      _isUploadingDocument
+                          ? settings.t('status_uploading')
+                          : settings.t('button_upload'),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.description, color: Colors.blue),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                _selectedFile!.name,
-                                style: Theme.of(context).textTheme.bodyMedium,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed:
-                                _isUploadingDocument ? null : _uploadIdDocument,
-                            icon: _isUploadingDocument
-                                ? const SizedBox(
-                                    height: 18,
-                                    width: 18,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.cloud_upload),
-                            label: Text(
-                              _isUploadingDocument
-                                  ? settings.t('status_uploading')
-                                  : settings.t('button_upload'),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ] else ...[
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _pickIdDocument,
-                      icon: const Icon(Icons.attach_file),
-                      label: Text(settings.t('button_select_document')),
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
                 ],
-                const SizedBox(height: 20),
-                SizedBox(
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: _isSubmitting ? null : _submitRegistration,
-                    child: _isSubmitting
-                        ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(settings.t('button_responder_register')),
-                  ),
-                ),
-              ],
+              ),
+          ],
+        ),
+      ),
+
+      const SizedBox(height: 28),
+
+      // 🔹 Submit Button
+      SizedBox(
+        height: 54,
+        child: ElevatedButton(
+          onPressed: _isSubmitting ? null : _submitRegistration,
+          style: ElevatedButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
             ),
           ),
+          child: _isSubmitting
+              ? const CircularProgressIndicator(strokeWidth: 2)
+              : Text(
+                  settings.t('button_responder_register'),
+                  style: const TextStyle(fontSize: 16),
+                ),
+        ),
+      ),
+    ],
+  ),
+),
+
         ),
       ),
     );
