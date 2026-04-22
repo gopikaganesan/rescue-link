@@ -260,7 +260,8 @@ class _HomeScreenState extends State<HomeScreen> {
           .replaceAll('{severity}', request.severity.toUpperCase());
       final body = settings
           .t('notification_new_nearby_sos_body')
-          .replaceAll('{category}', settings.localizedCrisisCategory(request.category))
+          .replaceAll(
+              '{category}', settings.localizedCrisisCategory(request.category))
           .replaceAll('{skill}', request.recommendedSkill)
           .replaceAll('{distance}', distance.toStringAsFixed(1));
 
@@ -459,7 +460,8 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (!mounted) return;
       _showSnackBar(
-        context.read<AppSettingsProvider>()
+        context
+            .read<AppSettingsProvider>()
             .t('snackbar_sos_error')
             .replaceAll('{error}', e.toString()),
       );
@@ -793,7 +795,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _currentSosRequestId = null;
     dialogNavigator.pop();
     messenger.showSnackBar(
-      SnackBar(content: Text(context.read<AppSettingsProvider>().t('snackbar_sos_cancelled'))),
+      SnackBar(
+          content: Text(
+              context.read<AppSettingsProvider>().t('snackbar_sos_cancelled'))),
     );
   }
 
@@ -870,7 +874,8 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 10),
               _buildStatusRow(
                 icon: Icons.accessibility_new,
-                text: settings.t('home_emergency_info_accessibility_transcription'),
+                text: settings
+                    .t('home_emergency_info_accessibility_transcription'),
                 style: infoTextStyle,
               ),
             ],
@@ -948,7 +953,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             TextButton(
               onPressed: () async {
-                final uri = Uri.parse('https://github.com/gopikaganesan/rescue-link');
+                final uri =
+                    Uri.parse('https://github.com/gopikaganesan/rescue-link');
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                 } else if (mounted) {
@@ -1000,7 +1006,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final auth = context.read<AuthProvider>();
     final user = auth.currentUser;
     if (user == null) {
-      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_sign_in_to_view_chats'));
+      _showSnackBar(context
+          .read<AppSettingsProvider>()
+          .t('snackbar_sign_in_to_view_chats'));
       return;
     }
 
@@ -1061,7 +1069,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _logoutRegisteredUser() async {
     await context.read<AuthProvider>().logout();
     if (mounted) {
-      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_signed_out'));
+      _showSnackBar(
+          context.read<AppSettingsProvider>().t('snackbar_signed_out'));
     }
   }
 
@@ -1210,6 +1219,15 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       onLogout: () async {
         await _logoutRegisteredUser();
+        if (!mounted) {
+          return;
+        }
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const AuthScreen(showGuestButton: false),
+          ),
+          (route) => false,
+        );
       },
       onOpenResponderRequests: _openResponderRequests,
       isResponderAvailable: authProvider.currentUser?.isResponder == true
@@ -1709,8 +1727,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final snackMessage =
-        context.read<AppSettingsProvider>().t(value ? 'snackbar_responder_online' : 'snackbar_responder_offline');
+    final snackMessage = context
+        .read<AppSettingsProvider>()
+        .t(value ? 'snackbar_responder_online' : 'snackbar_responder_offline');
 
     await responderProvider.setResponderAvailability(
       userId: userId,
@@ -1749,7 +1768,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _toggleVoiceInput() async {
     if (!_speechReady) {
-      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_voice_input_unavailable'));
+      _showSnackBar(context
+          .read<AppSettingsProvider>()
+          .t('snackbar_voice_input_unavailable'));
       return;
     }
 
@@ -2252,6 +2273,61 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ]));
                               })),
                           const SizedBox(height: 8),
+                          Consumer<LocationProvider>(
+                            builder: (context, locationProvider, _) {
+                              if (locationProvider.hasLocation) {
+                                return const SizedBox.shrink();
+                              }
+
+                              return Container(
+                                margin: const EdgeInsets.symmetric(vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.location_off,
+                                            color: Colors.orangeAccent,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              settings.t('location_not_ready'),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    _actionChip(
+                                      label: 'Fix',
+                                      onTap: () async {
+                                        if (!locationProvider.hasLocation) {
+                                          await locationProvider
+                                              .openPermissionSettings();
+                                        } else {
+                                          await locationProvider
+                                              .openLocationSettings();
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                           Consumer<AuthProvider>(
                             builder: (context, authProvider, _) {
                               final sosStatus =
@@ -2589,6 +2665,29 @@ Widget _actionCard({
             ),
           ),
         ],
+      ),
+    ),
+  );
+}
+
+Widget _actionChip({
+  required String label,
+  required VoidCallback onTap,
+}) {
+  return GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     ),
   );

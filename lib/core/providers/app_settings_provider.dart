@@ -1,5 +1,5 @@
-import 'dart:ui';
 
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
 class AppSettingsProvider extends ChangeNotifier {
@@ -240,6 +240,7 @@ class AppSettingsProvider extends ChangeNotifier {
       'accessibility_screen_reader_hint': 'Use the test buttons below to verify voice and vibration.',
       'button_voice_test': 'Voice Test',
       'button_flash_test': 'Flash Test',
+      'button_responder_register': 'Register as Responder',
       'snackbar_sos_cancelled': 'SOS cancelled.',
       'snackbar_responder_only_feature': 'This feature is available for responders only.',
       'button_force_critical': 'Force Critical',
@@ -1078,7 +1079,7 @@ class AppSettingsProvider extends ChangeNotifier {
       // Search & input hints
       'hint_search_case': 'வழக்கு ID அல்லது செய்தி மூலம் தேடவும்',
       'hint_emergency_context': 'அவசரநிலை சூழ்நிலையை விவரிக்கவும்',
-      'chat_type_message': 'ஒரு செய்தியை টাইப் செய்க',
+      'chat_type_message': 'ஒரு செய்தியை தட்டச்சு செய்க',
       // Labels
       'label_text_size': 'உரை அளவு',
       'label_haptics': 'ஆபிரக்ஸ் கருத்தோம்',
@@ -1315,7 +1316,7 @@ class AppSettingsProvider extends ChangeNotifier {
       'profile_sms_template': 'வணக்கம் {name}, இது RescueLink. ஒரு SOS கோரிக்கைக்கு உங்கள் உதவி தேவைப்படலாம்.',
       'button_responder_dashboard': 'பதிலளிப்பவர் டாஷ்போர்டு',
       'label_emergency_details_optional': 'அவசர விவரங்கள் (விருப்பத் தெரிவு)',
-      'hint_emergency_details_example': 'உதாரணம்: முதியவர் விழுந்தார், πλημμύρα அருகே, குழந்தை காணவில்லை, போக்குவரத்து இல்லை',
+      'hint_emergency_details_example': 'உதாரணம்: முதியவர் விழுந்தார்,  வெள்ளம் அருகே, குழந்தை காணவில்லை, போக்குவரத்து இல்லை',
       'tooltip_voice_to_text': 'ஒலி உரைக்கு',
       'tooltip_stop_voice_to_text': 'ஒலி உரையை நிறுத்து',
       'tooltip_record_voice_clip': 'ஒலி கிளிப் பதிவு செய்',
