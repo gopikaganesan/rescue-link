@@ -44,7 +44,8 @@ class ResponderChatListScreen extends StatefulWidget {
   }
 
   @override
-  State<ResponderChatListScreen> createState() => _ResponderChatListScreenState();
+  State<ResponderChatListScreen> createState() =>
+      _ResponderChatListScreenState();
 }
 
 class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
@@ -93,6 +94,12 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Signed out successfully.')),
         );
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const AuthScreen(showGuestButton: false),
+          ),
+          (route) => false,
+        );
       },
       onOpenResponderRequests: () {
         Navigator.of(context).pushReplacement(
@@ -134,357 +141,366 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
         },
         child: Column(
           children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: Wrap(
-              spacing: 8,
-              children: <Widget>[
-                ChoiceChip(
-                  label: Text(settings.t('filter_all_active')),
-                  selected: _showAllActiveChats,
-                  onSelected: (selected) {
-                    if (!selected) {
-                      return;
-                    }
-                    setState(() {
-                      _showAllActiveChats = true;
-                    });
-                  },
-                ),
-                ChoiceChip(
-                  label: Text(settings.t('filter_joined_by_me')),
-                  selected: !_showAllActiveChats,
-                  onSelected: (selected) {
-                    if (!selected) {
-                      return;
-                    }
-                    setState(() {
-                      _showAllActiveChats = false;
-                    });
-                  },
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value.trim().toLowerCase();
-                });
-              },
-              decoration: InputDecoration(
-                hintText: settings.t('hint_search_case'),
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchQuery.isEmpty
-                    ? null
-                    : IconButton(
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {
-                            _searchQuery = '';
-                          });
-                        },
-                        icon: const Icon(Icons.clear),
-                      ),
-                border: const OutlineInputBorder(),
-                isDense: true,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+              child: Wrap(
+                spacing: 8,
+                children: <Widget>[
+                  ChoiceChip(
+                    label: Text(settings.t('filter_all_active')),
+                    selected: _showAllActiveChats,
+                    onSelected: (selected) {
+                      if (!selected) {
+                        return;
+                      }
+                      setState(() {
+                        _showAllActiveChats = true;
+                      });
+                    },
+                  ),
+                  ChoiceChip(
+                    label: Text(settings.t('filter_joined_by_me')),
+                    selected: !_showAllActiveChats,
+                    onSelected: (selected) {
+                      if (!selected) {
+                        return;
+                      }
+                      setState(() {
+                        _showAllActiveChats = false;
+                      });
+                    },
+                  ),
+                ],
               ),
             ),
-          ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: stream,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text(settings.t('error_failed_load_chats')));
-                }
-
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final docs = snapshot.data?.docs ??
-                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-
-                if (docs.isEmpty) {
-                  return Center(
-                    child: Text(
-                      _showAllActiveChats
-                          ? settings.t('status_no_active_chats')
-                          : settings.t('status_no_joined_chats'),
-                    ),
-                  );
-                }
-
-                final cancelledDocsForUser = docs.where((doc) {
-                  final data = doc.data();
-                  final status =
-                      ((data['status'] as String?) ?? 'active').toLowerCase();
-                  return status == 'cancelled' &&
-                      _isJoinedByUser(data, widget.currentUserId);
-                }).toList();
-                if (cancelledDocsForUser.isNotEmpty) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _autoRemoveCancelledChats(cancelledDocsForUser);
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value.trim().toLowerCase();
                   });
-                }
+                },
+                decoration: InputDecoration(
+                  hintText: settings.t('hint_search_case'),
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {
+                              _searchQuery = '';
+                            });
+                          },
+                          icon: const Icon(Icons.clear),
+                        ),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            Expanded(
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: stream,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                        child: Text(settings.t('error_failed_load_chats')));
+                  }
 
-                final sortedDocs = docs.toList()
-                  ..sort((a, b) {
-                    final aData = a.data();
-                    final bData = b.data();
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                    if (_showAllActiveChats) {
-                      final aJoined = _isJoinedByUser(
-                        aData,
-                        widget.currentUserId,
-                      );
-                      final bJoined = _isJoinedByUser(
-                        bData,
-                        widget.currentUserId,
-                      );
-                      if (aJoined != bJoined) {
-                        return aJoined ? -1 : 1;
+                  final docs = snapshot.data?.docs ??
+                      const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+                  if (docs.isEmpty) {
+                    return Center(
+                      child: Text(
+                        _showAllActiveChats
+                            ? settings.t('status_no_active_chats')
+                            : settings.t('status_no_joined_chats'),
+                      ),
+                    );
+                  }
+
+                  final cancelledDocsForUser = docs.where((doc) {
+                    final data = doc.data();
+                    final status =
+                        ((data['status'] as String?) ?? 'active').trim().toLowerCase();
+                    return status == 'cancelled' &&
+                        _isJoinedByUser(data, widget.currentUserId);
+                  }).toList();
+                  if (cancelledDocsForUser.isNotEmpty) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _autoRemoveCancelledChats(cancelledDocsForUser);
+                    });
+                  }
+
+                  final sortedDocs = docs.toList()
+                    ..sort((a, b) {
+                      final aData = a.data();
+                      final bData = b.data();
+
+                      if (_showAllActiveChats) {
+                        final aJoined = _isJoinedByUser(
+                          aData,
+                          widget.currentUserId,
+                        );
+                        final bJoined = _isJoinedByUser(
+                          bData,
+                          widget.currentUserId,
+                        );
+                        if (aJoined != bJoined) {
+                          return aJoined ? -1 : 1;
+                        }
                       }
+
+                      final aTime = _createdAt(aData);
+                      final bTime = _createdAt(bData);
+                      return bTime.compareTo(aTime);
+                    });
+
+                  final filteredDocs = sortedDocs.where((doc) {
+                    final data = doc.data();
+                    final status =
+                        ((data['status'] as String?) ?? 'active').trim().toLowerCase();
+                    if (status == 'cancelled') {
+                      return false;
                     }
 
-                    final aTime = _createdAt(aData);
-                    final bTime = _createdAt(bData);
-                    return bTime.compareTo(aTime);
-                  });
+                    if (_searchQuery.isEmpty) {
+                      return true;
+                    }
 
-                final filteredDocs = sortedDocs.where((doc) {
-                  final data = doc.data();
-                  final status =
-                      ((data['status'] as String?) ?? 'active').toLowerCase();
-                  if (status == 'cancelled') {
-                    return false;
+                    final sosId =
+                        ((data['sosId'] as String?) ?? doc.id).toLowerCase();
+                    final overview = _asMap(data['sosOverview']);
+                    final message =
+                        ((overview['message'] as String?) ?? '').toLowerCase();
+
+                    return sosId.contains(_searchQuery) ||
+                        message.contains(_searchQuery);
+                  }).toList();
+
+                  if (filteredDocs.isEmpty) {
+                    return Center(
+                        child: Text(settings.t('status_no_matching_chats')));
                   }
 
-                  if (_searchQuery.isEmpty) {
-                    return true;
-                  }
+                  final joinedCount = filteredDocs
+                      .where(
+                        (doc) =>
+                            _isJoinedByUser(doc.data(), widget.currentUserId),
+                      )
+                      .length;
 
-                  final sosId = ((data['sosId'] as String?) ?? doc.id).toLowerCase();
-                  final overview = _asMap(data['sosOverview']);
-                  final message =
-                      ((overview['message'] as String?) ?? '').toLowerCase();
-
-                  return sosId.contains(_searchQuery) ||
-                      message.contains(_searchQuery);
-                }).toList();
-
-                if (filteredDocs.isEmpty) {
-                  return Center(child: Text(settings.t('status_no_matching_chats')));
-                }
-
-                final joinedCount = filteredDocs
-                    .where(
-                      (doc) =>
-                          _isJoinedByUser(doc.data(), widget.currentUserId),
-                    )
-                    .length;
-
-                return Column(
-                  children: <Widget>[
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            settings
-                                .t('responder_chat_showing_joined')
-                                .replaceAll('{total}', '${filteredDocs.length}')
-                                .replaceAll('{joined}', '$joinedCount'),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            settings.t('responder_chat_tap_hint'),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: ListView.separated(
-                        itemCount: filteredDocs.length,
-                        separatorBuilder: (_, __) => Divider(
-                          height: 1,
-                          color: Colors.grey.shade300,
+                  return Column(
+                    children: <Widget>[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              settings
+                                  .t('responder_chat_showing_joined')
+                                  .replaceAll(
+                                      '{total}', '${filteredDocs.length}')
+                                  .replaceAll('{joined}', '$joinedCount'),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              settings.t('responder_chat_tap_hint'),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
                         ),
-                        itemBuilder: (context, index) {
-                          final doc = filteredDocs[index];
-                          final data = doc.data();
+                      ),
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: filteredDocs.length,
+                          separatorBuilder: (_, __) => Divider(
+                            height: 1,
+                            color: Colors.grey.shade300,
+                          ),
+                          itemBuilder: (context, index) {
+                            final doc = filteredDocs[index];
+                            final data = doc.data();
 
-                          final sosId = (data['sosId'] as String?) ?? doc.id;
-                          final overview = _asMap(data['sosOverview']);
-                          final chatTitle = _humanFriendlyChatTitle(
-                            data: data,
-                            sosId: sosId,
-                            settings: settings,
-                          );
-                          final message = _safeText(
-                            overview['message'] as String?,
-                            fallback: settings.t('status_no_sos_message_available'),
-                            maxLen: 90,
-                          );
-                          final participantCount = _participantCount(data);
-                          final onlineCount = _onlineCount(data);
-                          final status = (data['status'] as String?) ?? 'active';
-                          final isJoinedByMe = _isJoinedByUser(
-                            data,
-                            widget.currentUserId,
-                          );
+                            final sosId = (data['sosId'] as String?) ?? doc.id;
+                            final overview = _asMap(data['sosOverview']);
+                            final chatTitle = _humanFriendlyChatTitle(
+                              data: data,
+                              sosId: sosId,
+                              settings: settings,
+                            );
+                            final message = _safeText(
+                              overview['message'] as String?,
+                              fallback:
+                                  settings.t('status_no_sos_message_available'),
+                              maxLen: 90,
+                            );
+                            final participantCount = _participantCount(data);
+                            final onlineCount = _onlineCount(data);
+                            final status =
+                                (data['status'] as String?) ?? 'active';
+                            final isJoinedByMe = _isJoinedByUser(
+                              data,
+                              widget.currentUserId,
+                            );
 
-                          return ListTile(
-                            dense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            title: Row(
-                              children: <Widget>[
-                                Expanded(
-                                  child: Text(
-                                    chatTitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: <Widget>[
-                                    Icon(
-                                      Icons.circle,
-                                      size: 10,
-                                      color: Colors.green.shade700,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '$onlineCount',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.green.shade700,
-                                          ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Icon(
-                                      Icons.group,
-                                      size: 10,
-                                      color: Colors.redAccent.shade700,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '$participantCount',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.redAccent.shade700,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                const SizedBox(height: 4),
-                                TranslatedText(
-                                  message,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: <Widget>[
-                                    Expanded(
-                                      child: Text(
-                                        '${context.read<AppSettingsProvider>().t('label_case_id')}: $sosId',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style:
-                                            Theme.of(context).textTheme.bodySmall,
+                            return ListTile(
+                              dense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              title: Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Text(
+                                      chatTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
                                       ),
                                     ),
-                                    Text(
-                                      _timeText(_createdAt(data)),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall,
-                                    ),
-                                  ],
-                                ),
-                                if (status != 'active') ...<Widget>[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    status == 'cancelled'
-                                        ? context.read<AppSettingsProvider>().t('status_cancelled')
-                                        : status.toUpperCase(),
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                          color: status == 'active'
-                                              ? Colors.green.shade800
-                                              : Colors.red.shade800,
-                                        ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      Icon(
+                                        Icons.circle,
+                                        size: 10,
+                                        color: Colors.green.shade700,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '$onlineCount',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.green.shade700,
+                                            ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Icon(
+                                        Icons.group,
+                                        size: 10,
+                                        color: Colors.redAccent.shade700,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '$participantCount',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.redAccent.shade700,
+                                            ),
+                                      ),
+                                    ],
                                   ),
                                 ],
-                              ],
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                if (isJoinedByMe)
-                                  Icon(
-                                    Icons.check_circle,
-                                    size: 18,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  const SizedBox(height: 4),
+                                  TranslatedText(
+                                    message,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                              ],
-                            ),
-                            onTap: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => GroupChatScreen(
-                                    sosId: sosId,
-                                    currentUserId: widget.currentUserId,
-                                    currentUserName: widget.currentUserName,
-                                    currentUserRole: 'responder',
-                                    enableResponderJoinGate: true,
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: <Widget>[
+                                      Expanded(
+                                        child: Text(
+                                          '${context.read<AppSettingsProvider>().t('label_case_id')}: $sosId',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
+                                        ),
+                                      ),
+                                      Text(
+                                        _timeText(_createdAt(data)),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              );
-                            },
-                          );
-                        },
+                                  if (status != 'active') ...<Widget>[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      status == 'cancelled'
+                                          ? context
+                                              .read<AppSettingsProvider>()
+                                              .t('status_cancelled')
+                                          : status.toUpperCase(),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            color: status == 'active'
+                                                ? Colors.green.shade800
+                                                : Colors.red.shade800,
+                                          ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  if (isJoinedByMe)
+                                    Icon(
+                                      Icons.check_circle,
+                                      size: 18,
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                    ),
+                                ],
+                              ),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => GroupChatScreen(
+                                      sosId: sosId,
+                                      currentUserId: widget.currentUserId,
+                                      currentUserName: widget.currentUserName,
+                                      currentUserRole: 'responder',
+                                      enableResponderJoinGate: true,
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                  ],
-                );
-              },
+                    ],
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
       bottomNavigationBar: FixedFooterNavigationBar(
         activeIndex: 2,
         onSosTap: () {
@@ -531,7 +547,6 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
       }
     }
   }
-
 
   static Map<String, dynamic> _asMap(dynamic raw) {
     if (raw is Map) {

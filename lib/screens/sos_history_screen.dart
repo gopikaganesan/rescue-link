@@ -82,27 +82,10 @@ class SosHistoryScreen extends StatelessWidget {
           }
 
           final docs = snapshot.data?.docs ?? const [];
-          DateTime? parseTimestamp(Object? raw) {
-            if (raw is Timestamp) return raw.toDate();
-            if (raw is DateTime) return raw;
-            return null;
-          }
 
           final filteredDocs = docs.where((doc) {
-            final data = doc.data();
-            final status =
-                ((data['status'] as String?) ?? 'open').toLowerCase();
-            if (status != 'cancelled') {
-              return true;
-            }
-            final createdAt = parseTimestamp(data['createdAt']) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            final cancelledAt = parseTimestamp(data['cancelledAt']);
-            if (cancelledAt == null) {
-              return true;
-            }
-            final difference = cancelledAt.difference(createdAt).inSeconds;
-            return difference > 30;
+            doc.data();
+            return true;
           }).toList();
 
           final sortedDocs = filteredDocs
@@ -271,14 +254,25 @@ class SosHistoryScreen extends StatelessWidget {
     if (!context.mounted) {
       return;
     }
-    final chatExists = chatDoc.exists;
+    final chatData = chatDoc.data();
+    final chatStatus = ((chatData?['status'] as String?) ?? '')
+        .trim()
+        .toLowerCase();
+    final participantUids = (chatData?['participantUids'] as List<dynamic>?)
+            ?.map((uid) => (uid as String?)?.trim() ?? '')
+            .where((uid) => uid.isNotEmpty)
+            .toSet() ??
+        <String>{};
+    final canDeleteChat = chatDoc.exists &&
+        chatStatus == 'cancelled' &&
+        participantUids.contains(currentUserId.trim());
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: Text(chatExists
+            title: Text(canDeleteChat
                 ? settings.t('dialog_delete_cancelled_chat_title')
                 : settings.t('dialog_delete_cancelled_summary_title')),
-            content: Text(chatExists
+            content: Text(canDeleteChat
                 ? settings.t('dialog_delete_cancelled_chat_body')
                 : settings.t('dialog_delete_cancelled_summary_body')),
             actions: <Widget>[
@@ -292,7 +286,7 @@ class SosHistoryScreen extends StatelessWidget {
                   backgroundColor: Colors.red,
                   foregroundColor: Colors.white,
                 ),
-                child: Text(chatExists
+                child: Text(canDeleteChat
                     ? settings.t('button_delete_chat')
                     : settings.t('button_delete_summary')),
               ),
@@ -305,7 +299,7 @@ class SosHistoryScreen extends StatelessWidget {
       return;
     }
 
-    if (chatDoc.exists) {
+    if (canDeleteChat) {
       try {
         await ChatService().deleteEntireChat(
           sosId: sosId,
@@ -367,7 +361,19 @@ class SosHistoryScreen extends StatelessWidget {
     if (!context.mounted) {
       return;
     }
+    final chatData = chatDoc.data();
+    final chatStatus = ((chatData?['status'] as String?) ?? '')
+        .trim()
+        .toLowerCase();
+    final participantUids = (chatData?['participantUids'] as List<dynamic>?)
+            ?.map((uid) => (uid as String?)?.trim() ?? '')
+            .where((uid) => uid.isNotEmpty)
+            .toSet() ??
+        <String>{};
     final chatExists = chatDoc.exists;
+    final canDeleteChat = chatExists &&
+        chatStatus == 'cancelled' &&
+        participantUids.contains(currentUserId.trim());
     final isActiveStatus = status == 'open' || status == 'active';
 
     await showDialog<void>(
@@ -405,6 +411,17 @@ class SosHistoryScreen extends StatelessWidget {
                         ),
                   ),
                 ],
+                if (status == 'cancelled' && !chatExists)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12.0),
+                    child: Text(
+                      settings.t('status_chat_summary_preserved'),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Colors.red.shade700),
+                    ),
+                  ),
                 if (status != 'cancelled' && !chatExists)
                   Padding(
                     padding: const EdgeInsets.only(top: 12.0),
@@ -455,7 +472,7 @@ class SosHistoryScreen extends StatelessWidget {
                 },
                 child: Text(settings.t('button_open_chat')),
               ),
-            if (status == 'cancelled' && chatExists)
+            if (status == 'cancelled' && canDeleteChat)
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.red,
@@ -467,7 +484,7 @@ class SosHistoryScreen extends StatelessWidget {
                 },
                 child: Text(settings.t('button_delete_chat')),
               ),
-            if (status == 'cancelled' && !chatExists)
+            if (status == 'cancelled' && !canDeleteChat)
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.red.shade700,
