@@ -773,12 +773,16 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
         return Scaffold(
           appBar: AppBar(
+            backgroundColor: Colors.white,
+            iconTheme: IconThemeData(
+    color: Colors.red, 
+  ),
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   context.read<AppSettingsProvider>().t('chat_group_title'),
-                  style: const TextStyle(fontSize: 16),
+                  style: const TextStyle(fontSize: 16,color:Colors.red,fontWeight: FontWeight.bold),
                 ),
                 Row(
                   children: [
@@ -2032,7 +2036,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           itemBuilder: (context) => <PopupMenuEntry<String>>[
             PopupMenuItem<String>(
               value: 'view_responders',
-              child: Text(context.read<AppSettingsProvider>().t('chat_view_responders')),
+              child: Text(context.read<AppSettingsProvider>().t('chat_view_responders'),style:TextStyle(color: Colors.red)),
             ),
             if (canShowNotificationToggle)
               PopupMenuItem<String>(
@@ -2040,18 +2044,18 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                 child: Text(
                   chatNotificationsEnabled
                       ? context.read<AppSettingsProvider>().t('menu_disable_notifications')
-                      : context.read<AppSettingsProvider>().t('menu_enable_notifications'),
+                      : context.read<AppSettingsProvider>().t('menu_enable_notifications'),style:TextStyle(color: Colors.red)
                 ),
               ),
             if (canDeleteForVictim)
               PopupMenuItem<String>(
                 value: 'delete_chat',
-                child: Text(context.read<AppSettingsProvider>().t('chat_delete_chat_victim')),
+                child: Text(context.read<AppSettingsProvider>().t('chat_delete_chat_victim'),style:TextStyle(color: Colors.red)),
               ),
             if (canLeaveForResponder)
               PopupMenuItem<String>(
                 value: 'leave_chat',
-                child: Text(context.read<AppSettingsProvider>().t('chat_leave_chat_responder')),
+                child: Text(context.read<AppSettingsProvider>().t('chat_leave_chat_responder'),style:TextStyle(color: Colors.red)),
               ),
           ],
         );
@@ -2078,98 +2082,151 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             children: [
               Text(
                 context.read<AppSettingsProvider>().t('chat_active_responders').replaceAll('{count}', '${responders.length}'),
-                style: Theme.of(ctx)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.bold),
+                style: TextStyle(color:Colors.red,fontWeight:FontWeight.bold),
               ),
               const SizedBox(height: 10),
               if (responders.isEmpty)
                 Text(context.read<AppSettingsProvider>().t('chat_no_participants_yet'))
               else
                 Expanded(
-                  child: ListView.builder(
-                    itemCount: responders.length,
-                    itemBuilder: (context, index) {
-                      final p = responders[index];
-                      final responderUid = (p['uid'] as String?) ?? '';
-                      final isAi = (p['isAi'] as bool?) ?? false;
-                      final name = _uiDisplayName(p['displayName'] as String?,
-                          fallback: context.read<AppSettingsProvider>().t('name_responder'));
-                      return ListTile(
-                        leading: GestureDetector(
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            if (isAi) {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => ResponderProfileScreen(
-                                    responder: ResponderModel.ai(),
-                                    currentUserId: widget.currentUserId,
-                                    currentUserName: widget.currentUserName,
-                                    isCurrentUserProfile: false,
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-                            _showResponderProfile(responderUid);
-                          },
-                          child: CircleAvatar(
-                            backgroundColor:
-                                Theme.of(context).colorScheme.primaryContainer,
-                            child: const Icon(Icons.person),
-                          ),
-                        ),
-                        title: Text(name,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: Text(context.read<AppSettingsProvider>().t('chat_tap_avatar_profile')),
-                        trailing: PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_horiz),
-                          onSelected: (value) {
-                            Navigator.pop(ctx);
-                            if (value == 'review') {
-                              if (isAi) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content:
-                                        Text('AI Assistant cannot be reviewed.'),
-                                  ),
-                                );
-                                return;
-                              }
-                              _showReviewAndRatingDialog(
-                                responderUid: responderUid,
-                                responderName: name,
-                              );
-                              return;
-                            }
-                            if (value == 'remove') {
-                              _confirmRemoveResponder(
-                                messenger: ScaffoldMessenger.of(context),
-                                responderUid: responderUid,
-                                responderName: name,
-                              );
-                            }
-                          },
-                          itemBuilder: (menuContext) => <PopupMenuEntry<String>>[
-                            const PopupMenuItem<String>(
-                              value: 'review',
-                              child: Text('Review & Rating'),
-                            ),
-                            if (_canManageResponders && !isAi &&
-                                responderUid != widget.currentUserId)
-                              const PopupMenuItem<String>(
-                                value: 'remove',
-                                child: Text('Remove Responder'),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
+  child: ListView.builder(
+    padding: const EdgeInsets.all(12),
+    itemCount: responders.length,
+    itemBuilder: (context, index) {
+      final p = responders[index];
+      final responderUid = (p['uid'] as String?) ?? '';
+      final isAi = (p['isAi'] as bool?) ?? false;
+
+      final name = _uiDisplayName(
+        p['displayName'] as String?,
+        fallback: context.read<AppSettingsProvider>().t('name_responder'),
+      );
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 8,
+              color: Colors.black.withOpacity(0.05),
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+
+          // 👤 Avatar
+          leading: GestureDetector(
+            onTap: () {
+              Navigator.pop(ctx);
+
+              if (isAi) {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ResponderProfileScreen(
+                      responder: ResponderModel.ai(),
+                      currentUserId: widget.currentUserId,
+                      currentUserName: widget.currentUserName,
+                      isCurrentUserProfile: false,
+                    ),
                   ),
+                );
+                return;
+              }
+
+              _showResponderProfile(responderUid);
+            },
+            child: CircleAvatar(
+              radius: 26,
+              backgroundColor:
+                  Theme.of(context).colorScheme.primaryContainer,
+              child: Icon(
+                isAi ? Icons.smart_toy : Icons.person,
+                color: Colors.red,
+              ),
+            ),
+          ),
+
+          // 📝 Name
+          title: Text(
+            name,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 16,
+            ),
+          ),
+
+          // 💬 Subtitle
+          subtitle: Text(
+            context
+                .read<AppSettingsProvider>()
+                .t('chat_tap_avatar_profile'),
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 13,
+            ),
+          ),
+
+          // ⚡ Trailing Actions
+          trailing: PopupMenuButton<String>(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            icon: Icon(
+              Icons.more_vert,
+              color: Colors.grey.shade700,
+            ),
+            onSelected: (value) {
+              Navigator.pop(ctx);
+
+              if (value == 'review') {
+                if (isAi) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                          'AI Assistant cannot be reviewed.'),
+                    ),
+                  );
+                  return;
+                }
+
+                _showReviewAndRatingDialog(
+                  responderUid: responderUid,
+                  responderName: name,
+                );
+              }
+
+              if (value == 'remove') {
+                _confirmRemoveResponder(
+                  messenger: ScaffoldMessenger.of(context),
+                  responderUid: responderUid,
+                  responderName: name,
+                );
+              }
+            },
+            itemBuilder: (menuContext) => [
+              const PopupMenuItem(
+                value: 'review',
+                child: Text('Review & Rating'),
+              ),
+              if (_canManageResponders &&
+                  !isAi &&
+                  responderUid != widget.currentUserId)
+                const PopupMenuItem(
+                  value: 'remove',
+                  child: Text('Remove Responder'),
                 ),
+            ],
+          ),
+        ),
+      );
+    },
+  ),
+),
             ],
           ),
         );
@@ -3302,7 +3359,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       alignment: Alignment.topCenter,
       child: Card(
         elevation: 2,
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        margin: const EdgeInsets.all(10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
