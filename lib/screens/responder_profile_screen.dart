@@ -616,22 +616,27 @@ await showDialog<void>(
                 ],
                 const SizedBox(height: 24),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      settings.t('profile_community_reviews'),
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    if (!widget.isCurrentUserProfile && widget.currentUserId != null)
-                      TextButton.icon(
-                        onPressed: _showReviewAndRatingDialog,
-                        icon: const Icon(Icons.add_reaction_outlined,color:Colors.red),
-                        label: Text(settings.t('profile_rate_review'),style:TextStyle(color:Colors.red)),
-                      ),
-                  ],
-                ),
+  children: [
+    Expanded(
+      child: Text(
+        settings.t('profile_community_reviews'),
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+        overflow: TextOverflow.ellipsis, // ✅ prevents overflow
+      ),
+    ),
+    if (!widget.isCurrentUserProfile && widget.currentUserId != null)
+      TextButton.icon(
+        onPressed: _showReviewAndRatingDialog,
+        icon: const Icon(Icons.add_reaction_outlined, color: Colors.red),
+        label: Text(
+          settings.t('profile_rate_review'),
+          style: const TextStyle(color: Colors.red),
+        ),
+      ),
+  ],
+),
                 const SizedBox(height: 12),
                 if (reviewData.isEmpty)
                   Container(

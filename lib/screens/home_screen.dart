@@ -555,222 +555,234 @@ class _HomeScreenState extends State<HomeScreen> {
     final messenger = ScaffoldMessenger.of(context);
 
     _isSosDialogVisible = true;
+
+    Widget _infoRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Text("$label: $value"),
+  );
+}
+
+Widget _actionBtn(String text, IconData icon, Color color, VoidCallback onTap) {
+  return ElevatedButton.icon(
+    onPressed: onTap,
+    icon: Icon(icon),
+    label: Text(text),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: color,
+      foregroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+    ),
+  );
+}
+
     showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: Colors.green.shade50,
-        title: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 28),
-            const SizedBox(width: 8),
-            Expanded(child: Text(settings.t('status_sos_received'))),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+  context: context,
+  barrierDismissible: false,
+  builder: (dialogContext) => Dialog(
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+  color: Colors.white,
+  borderRadius: BorderRadius.circular(20),
+  boxShadow: [
+    BoxShadow(
+      color: Colors.black.withOpacity(0.08),
+      blurRadius: 12,
+    ),
+  ],
+),
+      constraints: const BoxConstraints(maxHeight: 600),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          /// 🔝 HEADER
+          Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: Colors.green.shade100,
-                  border: Border.all(color: Colors.green, width: 2),
-                  borderRadius: BorderRadius.circular(8),
+                  shape: BoxShape.circle,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'SOS has been broadcast to nearby responders.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                child: const Icon(Icons.check, color: Colors.green),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  settings.t('status_sos_received'),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          /// 📦 CONTENT
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  /// STATUS CARD
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.green.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'SOS broadcasted successfully',
+                          style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Colors.green.shade800,
                           ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '📍 ${locationProvider.latitude?.toStringAsFixed(4)}, '
+                          '${locationProvider.longitude?.toStringAsFixed(4)}',
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  /// RESPONDERS
+                  Row(
+                    children: [
+                      const Icon(Icons.people, size: 18),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Nearby Responders: ${responderProvider.nearbyResponders.length}',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ],
+                  ),
+
+                  if (responderProvider.nearbyResponders.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        settings.t('no_nearby_responders_hint'),
+                        style: TextStyle(color: Colors.orange.shade700),
+                      ),
+                    ),
+
+                  /// 🤖 AI SECTION
+                  if (analysis != null) ...[
+                    const SizedBox(height: 16),
+                    Divider(),
+
                     Text(
-                      'Location: ${locationProvider.latitude?.toStringAsFixed(4)}, '
-                      '${locationProvider.longitude?.toStringAsFixed(4)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Nearby Responders: ${responderProvider.nearbyResponders.length}',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              if (responderProvider.nearbyResponders.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Text(
-                    'ℹ️ ${settings.t('no_nearby_responders_hint')}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: Colors.orange[800]),
-                  ),
-                ),
-              if (analysis != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  settings.t('analysis_results'),
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${settings.t('category_label')}: ${settings.localizedCrisisCategory(analysis.category)}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                Text(
-                  '${settings.t('severity_label')}: ${analysis.severity}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (_forceCriticalSeverity)
-                  Text(
-                    settings.t('manual_override_critical'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.red.shade800,
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                Text(
-                  '${settings.t('skill_match')}: ${settings.localizedSkill(analysis.recommendedSkill)}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (analysis.confidence > 0)
-                  Text(
-                    'AI confidence: ${(analysis.confidence * 100).toStringAsFixed(0)}%',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                if (analysis.humanReviewRecommended)
-                  Text(
-                    settings.t('human_review_recommended'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.orange.shade800,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                if (analysis.suggestedActions.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    settings.t('recommended_actions'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  ...analysis.suggestedActions.take(3).map(
-                        (action) => Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Text('• $action',
-                              style: Theme.of(context).textTheme.bodySmall),
-                        ),
-                      ),
-                ],
-                if (analysis.offlineMode)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8.0),
-                    child: Text(
-                      '🔌 ${settings.t('offline_mode_active')}',
+                      "AI Analysis",
                       style: Theme.of(context)
                           .textTheme
-                          .bodySmall
-                          ?.copyWith(color: Colors.orange[800]),
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
                     ),
-                  ),
-              ],
-              const SizedBox(height: 8),
-              if (_lastDeliveryRoute.isNotEmpty)
-                Text(
-                  '${settings.t('label_route')}: $_lastDeliveryRoute',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.grey[600],
+
+                    const SizedBox(height: 8),
+
+                    _infoRow("Category",
+                        settings.localizedCrisisCategory(analysis.category)),
+                    _infoRow("Severity", analysis.severity),
+                    _infoRow("Skill",
+                        settings.localizedSkill(analysis.recommendedSkill)),
+
+                    if (analysis.confidence > 0)
+                      _infoRow("Confidence",
+                          "${(analysis.confidence * 100).toStringAsFixed(0)}%"),
+
+                    if (analysis.humanReviewRecommended)
+                      Text(
+                        "⚠ Human review recommended",
+                        style: TextStyle(color: Colors.orange.shade800),
                       ),
+
+                    if (analysis.suggestedActions.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text("Actions",
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      ...analysis.suggestedActions.take(3).map(
+                            (e) => Text("• $e"),
+                          ),
+                    ],
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          /// 🔘 ACTIONS (WRAPPED)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              _actionBtn(
+                "Cancel",
+                Icons.close,
+                Colors.red,
+                () => _cancelCurrentSosRequest(
+                  _currentSosRequestId,
+                  dialogContext,
+                  emergencyRequestProvider,
+                  messenger,
+                ),
+              ),
+              _actionBtn(
+                "Map",
+                Icons.map,
+                Colors.grey.shade500,
+                () {
+                  Navigator.pop(dialogContext);
+                  _openMap();
+                },
+              ),
+              if (_currentSosRequestId != null)
+                _actionBtn(
+                  "Chat",
+                  Icons.chat,
+                  Colors.grey.shade500,
+                  () {
+                    Navigator.pop(dialogContext);
+                    _openCurrentSosChat();
+                  },
+                ),
+              if (responderProvider.nearbyResponders.isEmpty)
+                _actionBtn(
+                  "Call",
+                  Icons.call,
+                  Colors.red,
+                  () async {
+                    Navigator.pop(dialogContext);
+                    await _makeEmergencyCall();
+                  },
                 ),
             ],
           ),
-        ),
-        actions: [
-          // Cancel SOS - prominent red button
-          ElevatedButton.icon(
-            onPressed: () => _cancelCurrentSosRequest(
-              _currentSosRequestId,
-              dialogContext,
-              emergencyRequestProvider,
-              messenger,
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade600,
-              foregroundColor: Colors.white,
-            ),
-            icon: const Icon(Icons.close),
-            label: Text(
-                context.read<AppSettingsProvider>().t('button_cancel_sos')),
-          ),
-          const SizedBox(width: 8),
-          // View Map button
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              _openMap();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade600,
-              foregroundColor: Colors.white,
-            ),
-            icon: const Icon(Icons.map),
-            label:
-                Text(context.read<AppSettingsProvider>().t('button_view_map')),
-          ),
-          if (_currentSosRequestId != null) ...[
-            const SizedBox(width: 8),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _openCurrentSosChat();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green.shade700,
-                foregroundColor: Colors.white,
-              ),
-              icon: const Icon(Icons.chat_bubble_outline),
-              label: Text(
-                  context.read<AppSettingsProvider>().t('button_open_chat')),
-            ),
-          ],
-          if (responderProvider.nearbyResponders.isEmpty) ...[
-            const SizedBox(width: 8),
-            // Call Emergency button
-            ElevatedButton.icon(
-              onPressed: () async {
-                Navigator.pop(dialogContext);
-                await _makeEmergencyCall();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange.shade600,
-                foregroundColor: Colors.white,
-              ),
-              icon: const Icon(Icons.call),
-              label: Text(context
-                  .read<AppSettingsProvider>()
-                  .t('button_call_emergency')),
-            ),
-          ],
         ],
       ),
-    ).then((_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isSosDialogVisible = false;
-      });
-    });
+    ),
+  ),
+).then((_) { if (!mounted) { return; } setState(() { _isSosDialogVisible = false; }); });
 
     _announce(context.read<AppSettingsProvider>().t('status_sos_activated'));
   }

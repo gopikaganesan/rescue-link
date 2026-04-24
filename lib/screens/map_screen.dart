@@ -76,27 +76,38 @@ class _MapScreenState extends State<MapScreen> {
   bool get _hasTarget =>
       widget.targetLatitude != null && widget.targetLongitude != null;
 
-  Future<void> _openExternalNavigation() async {
+Future<void> _openExternalNavigation() async {
+  if (!_hasTarget) return;
 
-    if (!_hasTarget) {
-      return;
+  final lat = widget.targetLatitude!;
+  final lng = widget.targetLongitude!;
+
+  // ✅ Preferred universal Google Maps URL
+  final googleMapsUrl = Uri.parse(
+    "https://www.google.com/maps/search/?api=1&query=$lat,$lng",
+  );
+
+  // ✅ Android fallback (geo)
+  final geoUrl = Uri.parse("geo:$lat,$lng?q=$lat,$lng");
+
+  try {
+    if (await canLaunchUrl(googleMapsUrl)) {
+      await launchUrl(
+        googleMapsUrl,
+        mode: LaunchMode.externalApplication, 
+      );
+    } else if (Platform.isAndroid && await canLaunchUrl(geoUrl)) {
+      await launchUrl(
+        geoUrl,
+        mode: LaunchMode.externalApplication,
+      );
+    } else {
+      debugPrint("❌ Could not launch maps for $lat,$lng");
     }
-
-    final targetLat = widget.targetLatitude!;
-    final targetLng = widget.targetLongitude!;
-    Uri uri;
-
-    if (Platform.isAndroid) {
-    uri = Uri.parse("geo:$targetLat,$targetLng?q=$targetLat,$targetLng");
-  } else {
-    uri = Uri.parse("https://maps.google.com/?q=$targetLat,$targetLng");
+  } catch (e) {
+    debugPrint("🚨 Navigation error: $e");
   }
-
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri);
-  }else{
-  }
-  }
+}
 
   /// Animate camera to user location
   void _focusUserLocation() {

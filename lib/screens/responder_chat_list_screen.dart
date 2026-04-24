@@ -109,6 +109,31 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
     );
   }
 
+  Widget _buildSegment({
+  required String label,
+  required bool selected,
+  required VoidCallback onTap,
+}) {
+  return GestureDetector(
+    onTap: onTap,
+    child: Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: selected ? Colors.red : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: selected ? Colors.white : Colors.black87,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     final settings = context.read<AppSettingsProvider>();
@@ -143,64 +168,92 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-              child: Wrap(
-                spacing: 8,
-                children: <Widget>[
-                  ChoiceChip(
-                    label: Text(settings.t('filter_all_active')),
-                    selected: _showAllActiveChats,
-                    onSelected: (selected) {
-                      if (!selected) {
-                        return;
-                      }
-                      setState(() {
-                        _showAllActiveChats = true;
-                      });
-                    },
-                  ),
-                  ChoiceChip(
-                    label: Text(settings.t('filter_joined_by_me')),
-                    selected: !_showAllActiveChats,
-                    onSelected: (selected) {
-                      if (!selected) {
-                        return;
-                      }
-                      setState(() {
-                        _showAllActiveChats = false;
-                      });
-                    },
-                  ),
-                ],
-              ),
+              child: SingleChildScrollView(
+  scrollDirection: Axis.horizontal,
+  child: Container(
+    padding: const EdgeInsets.all(6),
+    decoration: BoxDecoration(
+      color: Colors.grey.shade300,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Row(
+      children: [
+        _buildSegment(
+          label: settings.t('filter_all_active'),
+          selected: _showAllActiveChats,
+          onTap: () {
+            setState(() {
+              _showAllActiveChats = true;
+            });
+          },
+        ),
+        _buildSegment(
+          label: settings.t('filter_joined_by_me'),
+          selected: !_showAllActiveChats,
+          onTap: () {
+            setState(() {
+              _showAllActiveChats = false;
+            });
+          },
+        ),
+      ],
+    ),
+  ),
+)
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value.trim().toLowerCase();
-                  });
-                },
-                decoration: InputDecoration(
-                  hintText: settings.t('hint_search_case'),
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _searchQuery.isEmpty
-                      ? null
-                      : IconButton(
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {
-                              _searchQuery = '';
-                            });
-                          },
-                          icon: const Icon(Icons.clear),
-                        ),
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
+  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+  child: TextField(
+    controller: _searchController,
+    onChanged: (value) {
+      setState(() {
+        _searchQuery = value.trim().toLowerCase();
+      });
+    },
+    decoration: InputDecoration(
+      hintText: settings.t('hint_search_case'),
+      prefixIcon: const Icon(Icons.search),
+
+      // Clear button
+      suffixIcon: _searchQuery.isEmpty
+          ? null
+          : IconButton(
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _searchQuery = '';
+                });
+              },
+              icon: const Icon(Icons.clear),
             ),
+
+      // 🎨 Modern rounded style
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(25),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(25),
+        borderSide: BorderSide(color: Colors.red.shade300),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(25),
+        borderSide: const BorderSide(
+          color: Colors.red,
+          width: 1.4,
+        ),
+      ),
+
+      filled: true,
+      fillColor: Theme.of(context).colorScheme.surface,
+
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 12,
+      ),
+    ),
+  ),
+),
             Expanded(
               child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                 stream: stream,
@@ -329,168 +382,196 @@ class _ResponderChatListScreenState extends State<ResponderChatListScreen> {
                             color: Colors.grey.shade300,
                           ),
                           itemBuilder: (context, index) {
-                            final doc = filteredDocs[index];
-                            final data = doc.data();
+  final doc = filteredDocs[index];
+  final data = doc.data();
 
-                            final sosId = (data['sosId'] as String?) ?? doc.id;
-                            final overview = _asMap(data['sosOverview']);
-                            final chatTitle = _humanFriendlyChatTitle(
-                              data: data,
-                              sosId: sosId,
-                              settings: settings,
-                            );
-                            final message = _safeText(
-                              overview['message'] as String?,
-                              fallback:
-                                  settings.t('status_no_sos_message_available'),
-                              maxLen: 90,
-                            );
-                            final participantCount = _participantCount(data);
-                            final onlineCount = _onlineCount(data);
-                            final status =
-                                (data['status'] as String?) ?? 'active';
-                            final isJoinedByMe = _isJoinedByUser(
-                              data,
-                              widget.currentUserId,
-                            );
+  final sosId = (data['sosId'] as String?) ?? doc.id;
+  final overview = _asMap(data['sosOverview']);
+  final chatTitle = _humanFriendlyChatTitle(
+    data: data,
+    sosId: sosId,
+    settings: settings,
+  );
+  final message = _safeText(
+    overview['message'] as String?,
+    fallback: settings.t('status_no_sos_message_available'),
+    maxLen: 90,
+  );
 
-                            return ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              title: Row(
-                                children: <Widget>[
-                                  Expanded(
-                                    child: Text(
-                                      chatTitle,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: <Widget>[
-                                      Icon(
-                                        Icons.circle,
-                                        size: 10,
-                                        color: Colors.green.shade700,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '$onlineCount',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.green.shade700,
-                                            ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Icon(
-                                        Icons.group,
-                                        size: 10,
-                                        color: Colors.redAccent.shade700,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '$participantCount',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.redAccent.shade700,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  const SizedBox(height: 4),
-                                  TranslatedText(
-                                    message,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    children: <Widget>[
-                                      Expanded(
-                                        child: Text(
-                                          '${context.read<AppSettingsProvider>().t('label_case_id')}: $sosId',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall,
-                                        ),
-                                      ),
-                                      Text(
-                                        _timeText(_createdAt(data)),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall,
-                                      ),
-                                    ],
-                                  ),
-                                  if (status != 'active') ...<Widget>[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      status == 'cancelled'
-                                          ? context
-                                              .read<AppSettingsProvider>()
-                                              .t('status_cancelled')
-                                          : status.toUpperCase(),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                            color: status == 'active'
-                                                ? Colors.green.shade800
-                                                : Colors.red.shade800,
-                                          ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  if (isJoinedByMe)
-                                    Icon(
-                                      Icons.check_circle,
-                                      size: 18,
-                                      color:
-                                          Theme.of(context).colorScheme.primary,
-                                    ),
-                                ],
-                              ),
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => GroupChatScreen(
-                                      sosId: sosId,
-                                      currentUserId: widget.currentUserId,
-                                      currentUserName: widget.currentUserName,
-                                      currentUserRole: 'responder',
-                                      enableResponderJoinGate: true,
-                                    ),
-                                  ),
-                                );
-                              },
-                            );
-                          },
+  final participantCount = _participantCount(data);
+  final onlineCount = _onlineCount(data);
+  final status = (data['status'] as String?) ?? 'active';
+  final isJoinedByMe =
+      _isJoinedByUser(data, widget.currentUserId);
+
+  return GestureDetector(
+    onTap: () {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => GroupChatScreen(
+            sosId: sosId,
+            currentUserId: widget.currentUserId,
+            currentUserName: widget.currentUserName,
+            currentUserRole: 'responder',
+            enableResponderJoinGate: true,
+          ),
+        ),
+      );
+    },
+    child: Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+          )
+        ],
+        border: Border.all(
+          color: isJoinedByMe
+              ? Colors.grey.shade300
+              : Colors.transparent,
+          width: 1.2,
+        ),
+      ),
+
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          /// 🔴 TITLE ROW
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  chatTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+
+              if (isJoinedByMe)
+                const Icon(Icons.check_circle, size: 18, color: Colors.red),
+
+              const SizedBox(width: 6),
+
+              Text(
+                _timeText(_createdAt(data)),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 6),
+
+          /// 💬 MESSAGE
+          Text(
+            message,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.grey.shade800,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          /// 📊 INFO ROW
+          Row(
+            children: [
+
+              /// 🟢 ONLINE
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.circle,
+                        size: 8, color: Colors.green.shade700),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$onlineCount online',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 8),
+
+              /// 👥 PARTICIPANTS
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.group,
+                        size: 12, color: Colors.red.shade700),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$participantCount',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.red.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const Spacer(),
+
+              /// 🆔 CASE ID
+              Text(
+                '#$sosId',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+
+          /// ⚠️ STATUS
+          if (status != 'active') ...[
+            const SizedBox(height: 6),
+            Text(
+              status == 'cancelled'
+                  ? settings.t('status_cancelled')
+                  : status.toUpperCase(),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Colors.red.shade700,
+              ),
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
+}
                         ),
                       ),
                     ],

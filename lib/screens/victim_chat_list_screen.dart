@@ -131,6 +131,7 @@ Widget _buildBadge({
   required Color color,
 }) {
   return Container(
+    margin: const EdgeInsets.symmetric(vertical:3),
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
       color: color.withOpacity(0.15),
@@ -192,47 +193,49 @@ Widget _buildBadge({
         child: Column(
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-              child: Container(
-  padding: const EdgeInsets.all(6),
-  decoration: BoxDecoration(
-    color: Colors.grey.shade300,
-    borderRadius: BorderRadius.circular(20),
-  ),
-  child: Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      _buildSegment(
-        label: context.read<AppSettingsProvider>().t('filter_active'),
-        selected: _filter == _VictimChatFilter.active,
-        onTap: () {
-          setState(() {
-            _filter = _VictimChatFilter.active;
-          });
-        },
+  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+  child: SingleChildScrollView(
+    scrollDirection: Axis.horizontal, // ✅ important
+    child: Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade300,
+        borderRadius: BorderRadius.circular(20),
       ),
-      _buildSegment(
-        label: context.read<AppSettingsProvider>().t('filter_cancelled'),
-        selected: _filter == _VictimChatFilter.cancelled,
-        onTap: () {
-          setState(() {
-            _filter = _VictimChatFilter.cancelled;
-          });
-        },
+      child: Row(
+        children: [
+          _buildSegment(
+            label: context.read<AppSettingsProvider>().t('filter_active'),
+            selected: _filter == _VictimChatFilter.active,
+            onTap: () {
+              setState(() {
+                _filter = _VictimChatFilter.active;
+              });
+            },
+          ),
+          _buildSegment(
+            label: context.read<AppSettingsProvider>().t('filter_cancelled'),
+            selected: _filter == _VictimChatFilter.cancelled,
+            onTap: () {
+              setState(() {
+                _filter = _VictimChatFilter.cancelled;
+              });
+            },
+          ),
+          _buildSegment(
+            label: context.read<AppSettingsProvider>().t('filter_all'),
+            selected: _filter == _VictimChatFilter.all,
+            onTap: () {
+              setState(() {
+                _filter = _VictimChatFilter.all;
+              });
+            },
+          ),
+        ],
       ),
-      _buildSegment(
-        label: context.read<AppSettingsProvider>().t('filter_all'),
-        selected: _filter == _VictimChatFilter.all,
-        onTap: () {
-          setState(() {
-            _filter = _VictimChatFilter.all;
-          });
-        },
-      ),
-    ],
+    ),
   ),
 ),
-            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: TextField(

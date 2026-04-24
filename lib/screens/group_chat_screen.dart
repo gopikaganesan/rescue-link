@@ -1456,104 +1456,134 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                             ),
                           ),
                         // Chat Input Box
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: <Widget>[
-                            Expanded(
-                              child: TextField(
-                                controller: _controller,
-                                enabled: canSendInChat,
-                                maxLength: _maxMessageLength,
-                                textInputAction: TextInputAction.send,
-                                minLines: 1,
-                                maxLines: 4,
-                                onSubmitted: (_) {
-                                  if (canSendInChat) _send();
-                                },
-                                decoration: InputDecoration(
-                                  hintText: context.read<AppSettingsProvider>().t('chat_type_message'),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 12),
-                                  prefixIcon: IconButton(
-                                    icon: Icon(_isTranscribing
-                                        ? Icons.stop
-                                        : Icons.transcribe),
-                                    onPressed: canSendInChat
-                                        ? _toggleVoiceTranscription
-                                        : null,
-                                    tooltip: _isTranscribing
-                                      ? context.read<AppSettingsProvider>().t('tooltip_stop_voice_to_text')
-                                      : context.read<AppSettingsProvider>().t('tooltip_voice_to_text'),
-                                  ),
-                                  suffixIcon: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      // Mic: record audio clip
-                                      IconButton(
-                                        icon: Icon(_isRecordingClip
-                                            ? Icons.stop_circle
-                                            : Icons.mic),
-                                        color: _isRecordingClip
-                                            ? Colors.red
-                                            : null,
-                                        onPressed: canSendInChat
-                                            ? _toggleVoiceRecording
-                                            : null,
-                                        tooltip: _isRecordingClip
-                                            ? 'Stop recording'
-                                            : 'Record audio clip',
-                                      ),
-                                      // Attach: camera / gallery / location
-                                      IconButton(
-                                        icon: const Icon(Icons.attach_file),
-                                        onPressed: canSendInChat
-                                            ? () => _showAttachOptions(context)
-                                            : null,
-                                        tooltip: 'Attach',
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            // Send button minimized
-                            Container(
-                              margin: const EdgeInsets.only(
-                                  bottom:
-                                      4), // better center alignment with text field
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: canSendInChat
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.grey,
-                              ),
-                              child: IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                    minWidth: 40, minHeight: 40),
-                                icon: _isSending
-                                    ? const SizedBox(
-                                        height: 18,
-                                        width: 18,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white),
-                                      )
-                                    : const Icon(Icons.send,
-                                        size: 20, color: Colors.white),
-                                onPressed:
-                                    !canSendInChat || _isSending || _isAskingAi
-                                        ? null
-                                        : _send,
-                                tooltip: 'Send',
-                              ),
-                            ),
-                          ],
-                        ),
+                        Container(
+  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+  decoration: BoxDecoration(
+    color: Colors.white,
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.05),
+        blurRadius: 8,
+      )
+    ],
+  ),
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      // TEXT FIELD AREA
+      Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(25),
+          ),
+          child: Row(
+            children: [
+              // Voice-to-text
+              IconButton(
+                icon: Icon(
+                  _isTranscribing ? Icons.stop : Icons.mic_none,
+                  color: Colors.red,
+                ),
+                onPressed:
+                    canSendInChat ? _toggleVoiceTranscription : null,
+              ),
+
+              // Text input
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  enabled: canSendInChat,
+                  maxLength: _maxMessageLength,
+                  textInputAction: TextInputAction.send,
+                  minLines: 1,
+                  maxLines: 4,
+                  onSubmitted: (_) {
+                    if (canSendInChat) _send();
+                  },
+                  decoration: InputDecoration(
+                    hintText: context
+                        .read<AppSettingsProvider>()
+                        .t('chat_type_message'),
+                    border: InputBorder.none,
+                    counterText: "", // removes length counter UI
+                  ),
+                ),
+              ),
+
+              // Attach
+              IconButton(
+                icon: const Icon(Icons.attach_file),
+                color: Colors.red,
+                onPressed: canSendInChat
+                    ? () => _showAttachOptions(context)
+                    : null,
+              ),
+
+              // Record clip
+              IconButton(
+                icon: Icon(
+                  _isRecordingClip ? Icons.stop_circle : Icons.mic,
+                  color: _isRecordingClip ? Colors.red : Colors.grey,
+                ),
+                onPressed: canSendInChat
+                    ? _toggleVoiceRecording
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+
+      const SizedBox(width: 8),
+
+      // SEND BUTTON
+      GestureDetector(
+        onTap: (!canSendInChat || _isSending || _isAskingAi)
+            ? null
+            : _send,
+        child: Container(
+          height: 48,
+          width: 48,
+          decoration: BoxDecoration(
+            color: canSendInChat ? Colors.red : Colors.grey,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.red.withOpacity(0.3),
+                blurRadius: 6,
+              )
+            ],
+          ),
+          child: Align(
+  alignment: Alignment.center,
+  child: Container(
+    height: 48,
+    width: 48,
+    decoration: BoxDecoration(
+      color: canSendInChat ? Colors.red : Colors.grey,
+      shape: BoxShape.circle,
+    ),
+    child: Center(
+      child: _isSending
+          ? const SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.send, color: Colors.white),
+    ),
+  ),
+)
+        ),
+      ),
+    ],
+  ),
+),
                         if (!canSendInChat && status != 'cancelled')
                           Padding(
                             padding: const EdgeInsets.only(

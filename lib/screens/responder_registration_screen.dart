@@ -472,27 +472,32 @@ class _ResponderRegistrationScreenState
       ),
       // 🔹 Skill Dropdown
       DropdownButtonFormField<String>(
-        value: _selectedSkill,
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: Colors.grey.shade100,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
-        ),
-        items: _skills.map((skill) {
-          return DropdownMenuItem(
-            value: skill,
-            child: Text(_skillLabel(context, skill)),
-          );
-        }).toList(),
-        onChanged: (value) {
-          if (value != null) {
-            setState(() => _selectedSkill = value);
-          }
-        },
+  isExpanded: true,
+  value: _selectedSkill,
+  decoration: InputDecoration(
+    filled: true,
+    fillColor: Colors.grey.shade100,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide.none,
+    ),
+  ),
+  items: _skills.map((skill) {
+    return DropdownMenuItem<String>(
+      value: skill,
+      child: Text(
+        _skillLabel(context, skill),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
       ),
+    );
+  }).toList(),
+  onChanged: (value) {
+    if (value != null) {
+      setState(() => _selectedSkill = value);
+    }
+  },
+),
 
       const SizedBox(height: 16),
       Padding(
@@ -500,28 +505,33 @@ class _ResponderRegistrationScreenState
         child:Text(settings.t('label_responder_type'),style: TextStyle(fontWeight: FontWeight.bold,color: Colors.red[300]),)
       ),
       // 🔹 Responder Type
-      DropdownButtonFormField<String>(
-        value: _responderType,
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: Colors.grey.shade100,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
-        ),
-        items: _responderTypes.map((type) {
-          return DropdownMenuItem(
-            value: type,
-            child: Text(_responderTypeLabel(context, type)),
-          );
-        }).toList(),
-        onChanged: (value) {
-          if (value != null) {
-            setState(() => _responderType = value);
-          }
-        },
+     DropdownButtonFormField<String>(
+  isExpanded: true, 
+  value: _responderType,
+  decoration: InputDecoration(
+    filled: true,
+    fillColor: Colors.grey.shade100,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide.none,
+    ),
+  ),
+  items: _responderTypes.map((type) {
+    return DropdownMenuItem<String>(
+      value: type,
+      child: Text(
+        _responderTypeLabel(context, type),
+        overflow: TextOverflow.ellipsis, // ✅ prevents overflow
+        maxLines: 1,
       ),
+    );
+  }).toList(),
+  onChanged: (value) {
+    if (value != null) {
+      setState(() => _responderType = value);
+    }
+  },
+),
 
       const SizedBox(height: 24),
 
