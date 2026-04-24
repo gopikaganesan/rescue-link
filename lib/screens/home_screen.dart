@@ -12,6 +12,7 @@ import 'package:record/record.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:torch_light/torch_light.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import '../core/providers/app_settings_provider.dart';
 import '../core/providers/auth_provider.dart';
 import '../core/providers/comms_provider.dart';
@@ -34,6 +35,8 @@ import 'responder_requests_screen.dart';
 import 'map_screen.dart';
 import '../widgets/account_sheet.dart';
 import '../widgets/sos_button.dart';
+import '../services/chat_service.dart';
+import '../core/utils/chat_message_utils.dart';
 
 enum _HomeHeaderMenuOption {
   language,
@@ -82,12 +85,14 @@ class _HomeScreenState extends State<HomeScreen> {
   XFile? _selectedImage;
   String? _voiceTranscript;
   String? _voiceAudioPath;
+  StreamSubscription? _intentDataStreamSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeScreen();
+      _setupShareIntentListener();
     });
     _initializeSpeech();
     _configureVoiceTestTts();
@@ -106,6 +111,20 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    _intentDataStreamSubscription?.cancel();
+    _voicePreviewCompleteSub?.cancel();
+    _responderPollingTimer?.cancel();
+    _stopOpenAppChatNotificationWatchers();
+    _flutterTts.stop();
+    _speechToText.stop();
+    _audioRecorder.dispose();
+    _voicePreviewPlayer.dispose();
+    _emergencyContextController.dispose();
+    super.dispose();
+  }
+
   /// Initialize location and responder data
   Future<void> _initializeScreen() async {
     final locationProvider = context.read<LocationProvider>();
@@ -119,6 +138,119 @@ class _HomeScreenState extends State<HomeScreen> {
     await _syncPushProfile();
     _startResponderAlertPolling();
     _startOpenAppChatNotificationWatchers();
+  }
+
+  void _setupShareIntentListener() {
+    // For sharing or opening urls/text coming from outside the app while the app is in the memory
+    _intentDataStreamSubscription =
+        ReceiveSharingIntent.instance.getMediaStream().listen((value) {
+      if (value.isNotEmpty) {
+        final text = value.first.path;
+        _handleSharedText(text);
+      }
+    }, onError: (err) {
+      debugPrint("getMediaStream error: $err");
+    });
+
+    // For sharing or opening urls/text coming from outside the app while the app is closed
+    ReceiveSharingIntent.instance.getInitialMedia().then((value) {
+      if (value.isNotEmpty) {
+        final text = value.first.path;
+        _handleSharedText(text);
+        // Reset the initial intent so it doesn't trigger again on every revisit
+        ReceiveSharingIntent.instance.reset();
+      }
+    });
+  }
+
+  void _handleSharedText(String text) {
+    if (!mounted) {
+      return;
+    }
+    // Deep detect if it's a youtube link
+    final youtubeIds = extractYoutubeVideoIds(text);
+    if (youtubeIds.isEmpty && !text.contains('http')) {
+      return;
+    }
+
+    _showChatSelectionDialog(text);
+  }
+
+  void _showChatSelectionDialog(String sharedText) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final auth = context.read<AuthProvider>();
+        final me = auth.currentUser;
+        if (me == null) return const SizedBox.shrink();
+
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('chats')
+              .where('participantUids', arrayContains: me.id)
+              .where('status', isEqualTo: 'active')
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final chats = snapshot.data!.docs;
+            if (chats.isEmpty) {
+              return AlertDialog(
+                title: const Text('No Active Chats'),
+                content: const Text('You need an active emergency chat to share this link.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('OK'),
+                  ),
+                ],
+              );
+            }
+
+            return AlertDialog(
+              title: const Text('Share to Chat'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: chats.length,
+                  itemBuilder: (context, index) {
+                    final chat = chats[index];
+                    final chatData = chat.data();
+                    final category = chatData['category'] as String? ?? 'General';
+                    final sosId = chat.id;
+
+                    return ListTile(
+                      leading: const Icon(Icons.emergency_share),
+                      title: Text('Emergency: $category'),
+                      subtitle: Text('ID: ${sosId.substring(0, 8)}...'),
+                      onTap: () async {
+                        final chatService = ChatService();
+                        await chatService.sendMessage(
+                          sosId: sosId,
+                          senderUid: me.id,
+                          senderName: me.displayName,
+                          senderRole: me.isResponder ? 'responder' : 'victim',
+                          text: sharedText,
+                        );
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Link shared to chat.')),
+                          );
+                        }
+                      },
+                    );
+                  },
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _initializeSpeech() async {
@@ -2156,18 +2288,7 @@ Widget _featureItem(IconData icon, String text, Color color) {
     }
   }
 
-  @override
-  void dispose() {
-    _responderPollingTimer?.cancel();
-    _stopOpenAppChatNotificationWatchers();
-    _flutterTts.stop();
-    _speechToText.stop();
-    _audioRecorder.dispose();
-    _voicePreviewCompleteSub?.cancel();
-    _voicePreviewPlayer.dispose();
-    _emergencyContextController.dispose();
-    super.dispose();
-  }
+
 
   PageRouteBuilder<void> _noTransitionRoute(Widget page) {
     return PageRouteBuilder<void>(

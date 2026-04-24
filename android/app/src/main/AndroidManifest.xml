@@ -44,6 +44,13 @@
             </intent-filter>
 
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+
+            <!-- Share Intent for receiving links -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
         <receiver android:name=".SosWidgetProvider" android:exported="true">
             <intent-filter>
@@ -70,8 +77,8 @@
             <data android:mimeType="text/plain"/>
         </intent>
         <intent>
-    <action android:name="android.intent.action.VIEW" />
-    <data android:scheme="geo" />
-  </intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
     </queries>
 </manifest>

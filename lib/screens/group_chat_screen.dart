@@ -1178,11 +1178,11 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                             duration: const Duration(milliseconds: 220),
                                             curve: Curves.easeOutCubic,
                                             alignment: Alignment.topLeft,
-                                            child: isAiMessage
-                                                ? _buildAiMessageContent(
-                                                    context, text)
-                                                : _buildLinkableText(
-                                                    context, text),
+                                            child: _buildMessageTextContent(
+                                              context,
+                                              text,
+                                              isAi: isAiMessage,
+                                            ),
                                           ),
                                           if (hasImageAttachment) ...<Widget>[
                                             const SizedBox(height: 8),
@@ -3636,7 +3636,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         color: Colors.black12,
         borderRadius: BorderRadius.circular(8),
       ),
-      alignment: Alignment.center,
       child: Text(
         type.contains('/') ? type.split('/').last : type,
         textAlign: TextAlign.center,
@@ -3645,7 +3644,11 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     );
   }
 
-  Widget _buildAiMessageContent(BuildContext context, String text) {
+  Widget _buildMessageTextContent(
+    BuildContext context,
+    String text, {
+    bool isAi = false,
+  }) {
     // Extract source and status markers
     String cleanText = text;
     String? sourceMarker;
@@ -3684,9 +3687,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
     // Extract all YouTube video IDs in order and deduplicate.
     final youtubeIds = extractYoutubeVideoIds(cleanText);
-    final visibleText = youtubeIds.isNotEmpty
-      ? _removeYoutubeUrlsForDisplay(cleanText)
-      : cleanText;
+    final visibleText = cleanText;
 
     // Extract phone numbers
     final phoneNumbers = _extractPhoneNumbers(visibleText);
@@ -3695,9 +3696,16 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     final lines = visibleText.split('\n');
     final widgets = <Widget>[];
 
+    final baseStyle = DefaultTextStyle.of(context).style.copyWith(
+          height: 1.35,
+          color: isAi ? Colors.red.shade900 : null,
+        );
+
     for (final line in lines) {
       final trimmed = line.trim();
-      if (trimmed.isEmpty) continue;
+      if (trimmed.isEmpty) {
+        continue;
+      }
 
       if (RegExp(r'^#{1,6}\s+').hasMatch(trimmed)) {
         final headingText = trimmed.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
@@ -3706,7 +3714,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           child: Text(
             headingText,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.red.shade900,
+                  color: isAi ? Colors.red.shade900 : null,
                   fontWeight: FontWeight.bold,
                 ),
           ),
@@ -3719,14 +3727,11 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Text('• ',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text('• ',
+                  style: baseStyle.copyWith(fontWeight: FontWeight.w600)),
               Expanded(
                 child: DefaultTextStyle(
-                  style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                        height: 1.35,
-                        color: Colors.red.shade900,
-                      ),
+                  style: baseStyle,
                   child: _buildBoldAwareText(context, bulletText),
                 ),
               ),
@@ -3735,7 +3740,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         ));
       } else if (RegExp(r'^\d+\.\s*').hasMatch(trimmed)) {
         // Numbered list
-        final match = RegExp(r'^(\d+)\.\s*(.*) $').firstMatch('$trimmed\u0000');
+        final match = RegExp(r'^(\d+)\.\s*(.*)$').firstMatch(trimmed);
         if (match != null) {
           widgets.add(Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
@@ -3743,13 +3748,10 @@ class _GroupChatScreenState extends State<GroupChatScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text('${match.group(1)}. ',
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                    style: baseStyle.copyWith(fontWeight: FontWeight.w600)),
                 Expanded(
                   child: DefaultTextStyle(
-                    style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                          height: 1.35,
-                          color: Colors.red.shade900,
-                        ),
+                    style: baseStyle,
                     child: _buildBoldAwareText(context, match.group(2)!),
                   ),
                 ),
@@ -3762,10 +3764,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         widgets.add(Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: DefaultTextStyle(
-            style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                  height: 1.35,
-                  color: Colors.red.shade900,
-                ),
+            style: baseStyle,
             child: _buildBoldAwareText(context, trimmed),
           ),
         ));
@@ -3808,21 +3807,27 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       ));
     }
 
-    // Add one embedded-style preview card per discovered YouTube video.
+    // Add one embedded-style preview card per discovered YouTube video IF it is trusted.
     if (youtubeIds.isNotEmpty) {
-      widgets.add(const SizedBox(height: 12));
-      for (var index = 0; index < youtubeIds.length; index++) {
-        widgets.add(
-          Padding(
-            padding: EdgeInsets.only(bottom: index == youtubeIds.length - 1 ? 0 : 8),
-            child: _buildYoutubePreviewCard(
-              context,
-              youtubeIds[index],
-              index: index,
-              total: youtubeIds.length,
+      final trustedIds = ChatService.getTrustedVideoIds();
+      final displayableIds = youtubeIds.where((id) => trustedIds.contains(id)).toList();
+
+      if (displayableIds.isNotEmpty) {
+        widgets.add(const SizedBox(height: 12));
+        for (var index = 0; index < displayableIds.length; index++) {
+          widgets.add(
+            Padding(
+              padding:
+                  EdgeInsets.only(bottom: index == displayableIds.length - 1 ? 0 : 8),
+              child: _buildYoutubePreviewCard(
+                context,
+                displayableIds[index],
+                index: index,
+                total: displayableIds.length,
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
     }
 
@@ -3839,22 +3844,15 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   String _removeYoutubeUrlsForDisplay(String text) {
-    final withoutWatchUrls = text.replaceAll(
-      RegExp(
-        r'https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}',
-        caseSensitive: false,
-      ),
-      '',
-    );
-    final withoutShortUrls = withoutWatchUrls.replaceAll(
-      RegExp(
-        r'https?:\/\/youtu\.be\/[A-Za-z0-9_-]{11}',
-        caseSensitive: false,
-      ),
-      '',
+    // Matches optional bullet point/numbering prefix followed by the URL, taking the whole line if the URL is the main content.
+    final youtubeRegex = RegExp(
+      r'(?:^[\s\-*•]*|[\n][\s\-*•]*)https?:\/\/(?:(?:www\.)?youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}[\s]*',
+      caseSensitive: false,
     );
 
-    return withoutShortUrls
+    final cleaned = text.replaceAll(youtubeRegex, '');
+
+    return cleaned
         .split('\n')
         .map((line) => line.trimRight())
         .where((line) => line.trim().isNotEmpty)
@@ -3916,9 +3914,13 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     return GestureDetector(
       onTap: () async {
         try {
-          await launchUrl(youtubeUrl, mode: LaunchMode.inAppWebView);
+          // Prioritize opening in the native YouTube app or external browser to avoid "Webpage not available" errors.
+          final launched = await launchUrl(youtubeUrl, mode: LaunchMode.externalApplication);
+          if (!launched) {
+            await launchUrl(youtubeUrl, mode: LaunchMode.inAppBrowserView);
+          }
         } catch (_) {
-          await launchUrl(youtubeUrl, mode: LaunchMode.externalApplication);
+          await launchUrl(youtubeUrl, mode: LaunchMode.platformDefault);
         }
       },
       child: Container(
@@ -3975,7 +3977,28 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                       ),
                     ),
                   ),
-                  Icon(Icons.open_in_new, color: Colors.red[400], size: 18),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.red[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'YouTube App',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.red[700],
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.open_in_new, color: Colors.red[700], size: 14),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -3985,104 +4008,75 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     );
   }
 
-  /// Renders plain chat text but makes geo: and https: URLs tappable.
-  Widget _buildLinkableText(BuildContext context, String text) {
-    // Pattern matches geo:lat,lng  or  https://...
-    final urlPattern =
-        RegExp(r'(geo:\-?\d+(\.\d+)?,\-?\d+(\.\d+)?)|(https?://[^\s]+)');
-    final matches = urlPattern.allMatches(text);
 
+
+  Widget _buildBoldAwareText(BuildContext context, String text) {
     final spans = <InlineSpan>[];
-    int last = 0;
-    final style = DefaultTextStyle.of(context).style;
-    final linkStyle = style.copyWith(
+    // Matches **bold**, __bold__, *italic*, _italic_, or https://links
+    final regex = RegExp(
+        r'(\*\*|__)(.+?)\1|(\*|_)(.+?)\3|(https?:\/\/[^\s]+)',
+        caseSensitive: false);
+    int lastIndex = 0;
+
+    final defaultStyle = DefaultTextStyle.of(context).style.copyWith(height: 1.35);
+    final linkStyle = defaultStyle.copyWith(
       color: Colors.blue[700],
       decoration: TextDecoration.underline,
     );
 
-    for (final m in matches) {
-      if (m.start > last) {
-        spans.add(TextSpan(text: text.substring(last, m.start), style: style));
-      }
-      final url = m.group(0)!;
-      spans.add(WidgetSpan(
-        alignment: PlaceholderAlignment.baseline,
-        baseline: TextBaseline.alphabetic,
-        child: GestureDetector(
-          onTap: () async {
-            try {
-              await launchUrl(Uri.parse(url),
-                  mode: LaunchMode.externalApplication);
-            } catch (_) {
-              await launchUrl(Uri.parse(url), mode: LaunchMode.inAppWebView);
-            }
-          },
-          child: Text(
-            url.startsWith('geo:') ? '📍 Open in Maps' : url,
-            style: linkStyle,
-          ),
-        ),
-      ));
-      last = m.end;
-    }
-    if (last < text.length) {
-      spans.add(TextSpan(text: text.substring(last), style: style));
-    }
-
-    final Widget messageText = matches.isEmpty
-        ? Text(text)
-        : RichText(
-            textScaler: MediaQuery.textScalerOf(context),
-            text: TextSpan(children: spans),
-          );
-
-    final phoneNumbers = _extractPhoneNumbers(text);
-    if (phoneNumbers.isEmpty) {
-      return messageText;
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        messageText,
-        const SizedBox(height: 8),
-        _buildCallButtons(context, phoneNumbers),
-      ],
-    );
-  }
-
-  Widget _buildBoldAwareText(BuildContext context, String text) {
-    final parts = <TextSpan>[];
-    final regex = RegExp(r'(\*\*|__)(.+?)\1|(\*|_)(.+?)\3');
-    int lastIndex = 0;
-
     for (final match in regex.allMatches(text)) {
+      // Add plain text before match
       if (match.start > lastIndex) {
-        parts.add(TextSpan(text: text.substring(lastIndex, match.start)));
+        spans.add(TextSpan(
+            text: text.substring(lastIndex, match.start), style: defaultStyle));
       }
 
-      final matchedText = match.group(2) ?? match.group(4) ?? '';
-      final isStrong = match.group(1) != null;
+      final boldText = match.group(2);
+      final italicText = match.group(4);
+      final urlMatch = match.group(5);
 
-      parts.add(TextSpan(
-        text: matchedText,
-        style: isStrong
-            ? const TextStyle(fontWeight: FontWeight.bold)
-            : const TextStyle(fontStyle: FontStyle.italic),
-      ));
+      if (boldText != null) {
+        spans.add(TextSpan(
+          text: boldText,
+          style: defaultStyle.copyWith(fontWeight: FontWeight.bold),
+        ));
+      } else if (italicText != null) {
+        spans.add(TextSpan(
+          text: italicText,
+          style: defaultStyle.copyWith(fontStyle: FontStyle.italic),
+        ));
+      } else if (urlMatch != null) {
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: GestureDetector(
+            onTap: () async {
+              final uri = Uri.parse(urlMatch);
+              try {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } catch (_) {
+                await launchUrl(uri, mode: LaunchMode.inAppWebView);
+              }
+            },
+            child: Text(
+              urlMatch.startsWith('geo:') ? '📍 Open in Maps' : urlMatch,
+              style: linkStyle,
+            ),
+          ),
+        ));
+      }
+
       lastIndex = match.end;
     }
 
     if (lastIndex < text.length) {
-      parts.add(TextSpan(text: text.substring(lastIndex)));
+      spans.add(TextSpan(
+          text: text.substring(lastIndex), style: defaultStyle));
     }
 
     return RichText(
       textScaler: MediaQuery.textScalerOf(context),
-      text: TextSpan(
-        style: DefaultTextStyle.of(context).style.copyWith(height: 1.35),
-        children: parts,
-      ),
+      text: TextSpan(children: spans),
     );
   }
 

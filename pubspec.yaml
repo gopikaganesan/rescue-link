@@ -57,6 +57,7 @@ dependencies:
   home_widget: ^0.7.0
   app_links: ^6.3.3
   geocoding: ^4.0.0
+  receive_sharing_intent: ^1.8.1
 
 dev_dependencies:
   flutter_test:
