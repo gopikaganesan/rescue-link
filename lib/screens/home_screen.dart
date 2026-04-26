@@ -908,16 +908,15 @@ Widget _actionBtn(String text, IconData icon, Color color, VoidCallback onTap) {
                     _openCurrentSosChat();
                   },
                 ),
-              if (responderProvider.nearbyResponders.isEmpty)
-                _actionBtn(
-                  "Call",
-                  Icons.call,
-                  Colors.red,
-                  () async {
-                    Navigator.pop(dialogContext);
-                    await _makeEmergencyCall();
-                  },
-                ),
+              _actionBtn(
+                "Call",
+                Icons.call,
+                Colors.red,
+                () async {
+                  Navigator.pop(dialogContext);
+                  await _makeEmergencyCall();
+                },
+              ),
             ],
           ),
         ],

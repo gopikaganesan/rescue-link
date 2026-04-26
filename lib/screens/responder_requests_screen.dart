@@ -568,25 +568,33 @@ Widget _sectionText(String title, String value) {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: () => _navigateInApp(request),
-                icon: const Icon(Icons.navigation),
-                label: Text(settings.t('navigate')),
+                icon: const Icon(Icons.navigation, size: 18),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(settings.t('navigate')),
+                ),
                 style: OutlinedButton.styleFrom(
-  backgroundColor: Colors.grey.shade100, // ✅ light grey bg
-  foregroundColor: Colors.red,           // ✅ text + icon red
-  side: BorderSide(color: Colors.red.shade300), // ✅ border
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(12),
-  ),
-),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  backgroundColor: Colors.grey.shade100,
+                  foregroundColor: Colors.red,
+                  side: BorderSide(color: Colors.red.shade300),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: () => _accept(request),
-                icon: const Icon(Icons.check),
-                label: Text(settings.t('button_accept')),
+                icon: const Icon(Icons.check, size: 18),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(settings.t('button_accept')),
+                ),
                 style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   backgroundColor: Colors.red,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
