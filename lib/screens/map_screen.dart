@@ -70,7 +70,31 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    // Don't initialize map here, wait for onMapCreated callback
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeNearbyResponders();
+    });
+  }
+
+  Future<void> _initializeNearbyResponders() async {
+    final locationProvider = context.read<LocationProvider>();
+    final responderProvider = context.read<ResponderProvider>();
+
+    if (!locationProvider.hasLocation) {
+      await locationProvider.refreshLocationStatus(fetchLocation: true);
+    }
+
+    if (locationProvider.hasLocation && mounted) {
+      // If we have a target (SOS), we might want to filter by that context.
+      // For general map view, we use a default 5km radius.
+      await responderProvider.fetchResponders();
+      if (mounted) {
+        responderProvider.findNearbyResponders(
+          locationProvider.latitude!,
+          locationProvider.longitude!,
+          5.0, // Default 5km radius for map view
+        );
+      }
+    }
   }
 
   bool get _hasTarget =>

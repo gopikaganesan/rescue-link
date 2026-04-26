@@ -444,6 +444,16 @@ class _HomeScreenState extends State<HomeScreen> {
         _currentSosRequestId = requestId;
         context.read<SosStatusProvider>().setActiveSos(requestId);
 
+        // Populate nearby responders based on the triggered SOS analysis
+        final analysis = crisisProvider.latestAnalysis;
+        responderProvider.findNearbyResponders(
+          locationProvider.latitude!,
+          locationProvider.longitude!,
+          ResponderMatchingService.radiusKmForSeverity(
+              analysis?.severity ?? 'medium'),
+          requiredSkill: analysis?.recommendedSkill,
+        );
+
         // Track the route (for UI feedback)
         _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
           settings: appSettings,
