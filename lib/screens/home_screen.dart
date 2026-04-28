@@ -65,7 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final Map<String, String> _lastSeenChatMessageIdBySosId = <String, String>{};
   String? _chatWatcherUserId;
   final Set<String> _notifiedRequestIds = <String>{};
-  String _lastDeliveryRoute = '';
   String? _currentSosRequestId; // Track current SOS for cancellation
   bool _isSosDialogVisible = false;
   bool _isSosCancelRequested = false;
@@ -219,31 +218,131 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, index) {
                     final chat = chats[index];
                     final chatData = chat.data();
-                    final category = chatData['category'] as String? ?? 'General';
                     final sosId = chat.id;
 
-                    return ListTile(
-                      leading: const Icon(Icons.emergency_share),
-                      title: Text('Emergency: $category'),
-                      subtitle: Text('ID: ${sosId.substring(0, 8)}...'),
-                      onTap: () async {
-                        final chatService = ChatService();
-                        await chatService.sendMessage(
-                          sosId: sosId,
-                          senderUid: me.id,
-                          senderName: me.displayName,
-                          senderRole: me.isResponder ? 'responder' : 'victim',
-                          text: sharedText,
-                        );
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Link shared to chat.')),
+                    final overview = chatData['sosOverview'] is Map 
+                        ? Map<String, dynamic>.from(chatData['sosOverview'] as Map) 
+                        : <String, dynamic>{};
+                    final crisisType = ((overview['crisisType'] as String?) ??
+                            (chatData['crisisType'] as String?) ??
+                            '').trim();
+
+                    String victimName = 'Victim';
+                    final participants = chatData['participants'];
+                    if (participants is List) {
+                      for (final entry in participants.whereType<Map>()) {
+                        final role = ((entry['role'] as String?) ?? '').toLowerCase();
+                        final displayName = (entry['displayName'] as String?)?.trim() ?? '';
+                        if (role == 'victim' && displayName.isNotEmpty) {
+                          if (displayName.toLowerCase() != 'victim') {
+                            victimName = displayName;
+                            break;
+                          }
+                        }
+                      }
+                    }
+
+                    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      future: FirebaseFirestore.instance
+                          .collection('emergency_requests')
+                          .doc(sosId)
+                          .get(),
+                      builder: (context, sosSnapshot) {
+                        if (sosSnapshot.connectionState == ConnectionState.waiting) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.grey.shade200),
+                            ),
+                            child: const ListTile(
+                              title: Text('Loading emergency details...'),
+                              leading: Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              ),
+                            ),
                           );
                         }
-                      },
-                    );
-                  },
+
+                        final sosData = sosSnapshot.data?.data() ?? {};
+                        final category = (sosData['category'] as String? ?? crisisType).trim();
+                        final victimNameFromSos = sosData['requesterName'] as String? ?? 
+                            sosData['victimName'] as String?;
+                        final displayVictimName = (victimNameFromSos != null && victimNameFromSos.trim().isNotEmpty) 
+                            ? victimNameFromSos.trim() 
+                            : victimName;
+
+                        final emoji = switch (category.toLowerCase()) {
+                          'fire emergency' || 'fire' => '🔥',
+                          'medical emergency' || 'medical' || 'medical safety emergency' => '🚑',
+                          'search and rescue' || 'search & rescue' => '🚁',
+                          'disaster response' || 'disaster evacuation' || 'disaster' => '🌪️',
+                          'police/security' || 'security' => '🚓',
+                          'women safety' || 'women' => '🛡️',
+                          'child safety' || 'child' => '🧸',
+                          'elderly assistance' || 'elderly assist' || 'elderly' => '🦽',
+                          'shelter & evacuation' || 'shelter' => '⛺',
+                          'food & water supply' || 'food' => '🍲',
+                          'essential supply need' || 'essential medicines' || 'medicine' => '💊',
+                          'water rescue emergency' => '🏊',
+                          'railway hazard emergency' => '🚂',
+                          'entrapment rescue' => '🪜',
+                          'animal/insect attack' => '🐝',
+                          'general emergency' || 'general support' || 'general' => '🆘',
+                          _ => '🆘',
+                        };
+
+                        final titleText = '$emoji $displayVictimName';
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.red.shade100),
+                          ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.white,
+                              child: Text(emoji, style: const TextStyle(fontSize: 20)),
+                            ),
+                            title: Text(
+                              titleText,
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 4.0),
+                              child: Text('ID: ${sosId.substring(0, 8)}...'),
+                            ),
+                        trailing: Icon(Icons.chevron_right, color: Colors.red.shade300),
+                        onTap: () async {
+                          final chatService = ChatService();
+                          await chatService.sendMessage(
+                            sosId: sosId,
+                            senderUid: me.id,
+                            senderName: me.displayName,
+                            senderRole: me.isResponder ? 'responder' : 'victim',
+                            text: sharedText,
+                          );
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Link shared to chat.')),
+                            );
+                          }
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
                 ),
               ),
             );
@@ -586,12 +685,6 @@ class _HomeScreenState extends State<HomeScreen> {
           requiredSkill: analysis?.recommendedSkill,
         );
 
-        // Track the route (for UI feedback)
-        _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
-          settings: appSettings,
-          cloudWriteSucceeded: true,
-          hasNearbyResponders: responderProvider.nearbyResponders.isNotEmpty,
-        );
 
         _showSOSConfirmation();
       } else if (_isSosCancelRequested) {
@@ -985,51 +1078,83 @@ Widget _actionBtn(String text, IconData icon, Color color, VoidCallback onTap) {
       barrierDismissible: true,
       builder: (dialogContext) {
         final infoTextStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Colors.blueGrey.shade800,
+              color: Colors.green.shade900,
               fontSize: 14,
             );
 
-        return AlertDialog(
-          title: Row(
-            children: [
-              Expanded(child: Text(settings.t('home_emergency_info_title'))),
-              IconButton(
-                icon: const Icon(Icons.close,color: Colors.red),
-                onPressed: () => Navigator.of(dialogContext).pop(),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildStatusRow(
-                icon: Icons.mic,
-                text: settings.t(voiceStatusKey),
-                style: infoTextStyle,
-              ),
-              const SizedBox(height: 10),
-              _buildStatusRow(
-                icon: Icons.smart_toy,
-                text: settings
-                    .t('home_ai_status')
-                    .replaceAll('{status}', aiStatusLabel),
-                style: infoTextStyle,
-              ),
-              const SizedBox(height: 10),
-              _buildStatusRow(
-                icon: Icons.wifi_off,
-                text: settings.t(fallbackStatusKey),
-                style: infoTextStyle,
-              ),
-              const SizedBox(height: 10),
-              _buildStatusRow(
-                icon: Icons.accessibility_new,
-                text: settings
-                    .t('home_emergency_info_accessibility_transcription'),
-                style: infoTextStyle,
-              ),
-            ],
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.green.shade300),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        settings.t('home_emergency_info_title'),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green.shade800,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () => Navigator.of(dialogContext).pop(),
+                      child: Icon(Icons.close, color: Colors.green.shade800, size: 24),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildStatusRow(
+                  icon: Icons.mic,
+                  text: settings.t(voiceStatusKey),
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+                const SizedBox(height: 12),
+                _buildStatusRow(
+                  icon: Icons.smart_toy,
+                  text: settings
+                      .t('home_ai_status')
+                      .replaceAll('{status}', aiStatusLabel),
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+                const SizedBox(height: 12),
+                _buildStatusRow(
+                  icon: commsProvider.forceOfflineAi ? Icons.wifi_off : Icons.cloud_done,
+                  text: settings.t(fallbackStatusKey),
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+                const SizedBox(height: 12),
+                _buildStatusRow(
+                  icon: Icons.accessibility_new,
+                  text: settings.t('home_emergency_info_accessibility_status'),
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+                const SizedBox(height: 12),
+                _buildStatusRow(
+                  icon: Icons.transcribe,
+                  text: 'Transcription status available',
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -1040,12 +1165,13 @@ Widget _actionBtn(String text, IconData icon, Color color, VoidCallback onTap) {
     required IconData icon,
     required String text,
     required TextStyle? style,
+    Color? iconColor,
   }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: Colors.red.shade700),
-        const SizedBox(width: 10),
+        Icon(icon, size: 20, color: iconColor ?? Colors.red.shade700),
+        const SizedBox(width: 12),
         Expanded(
           child: Text(
             text,
@@ -1055,6 +1181,8 @@ Widget _actionBtn(String text, IconData icon, Color color, VoidCallback onTap) {
       ],
     );
   }
+
+
 
   /// Show snackbar message
   void _showSnackBar(String message) {
@@ -1179,12 +1307,14 @@ Widget _featureItem(IconData icon, String text, Color color) {
         final uri = Uri.parse(
             'https://github.com/gopikaganesan/rescue-link');
 
-        if (await canLaunchUrl(uri)) {
+        try {
           await launchUrl(uri,
               mode: LaunchMode.externalApplication);
-        } else if (mounted) {
-          _showSnackBar(
-              settings.t('home_about_app_github_failed'));
+        } catch (e) {
+          if (mounted) {
+            _showSnackBar(
+                settings.t('home_about_app_github_failed'));
+          }
         }
       },
       label: Text(settings.t('home_about_app_github')),

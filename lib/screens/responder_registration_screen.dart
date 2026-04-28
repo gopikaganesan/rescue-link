@@ -2,6 +2,11 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:google_phone_number_hint/google_phone_number_hint.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
+import 'package:intl_phone_field/phone_number.dart';
+import '../core/services/media_upload_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/models/responder_model.dart';
@@ -29,6 +34,7 @@ class _ResponderRegistrationScreenState
   String _responderType = 'Community Volunteer';
   bool _isSubmitting = false;
   PlatformFile? _selectedFile;
+  XFile? _selectedXFile;
   String? _uploadedDocumentUrl;
   bool _isUploadingDocument = false;
   bool _isInfoExpanded = false;
@@ -106,6 +112,17 @@ class _ResponderRegistrationScreenState
     });
   }
 
+  String _stripCountryCode(String number) {
+    var clean = number.trim().replaceAll(' ', '').replaceAll('-', '');
+    if (clean.startsWith('+91')) {
+      return clean.substring(3);
+    }
+    if (clean.startsWith('0')) {
+      return clean.substring(1);
+    }
+    return clean;
+  }
+
   void _prefillProfile() {
     final authProvider = context.read<AuthProvider>();
     final responderProvider = context.read<ResponderProvider>();
@@ -121,7 +138,7 @@ class _ResponderRegistrationScreenState
 
     final phoneCandidate = user.phoneNumber ?? '';
     if (_phoneController.text.trim().isEmpty && phoneCandidate.trim().isNotEmpty) {
-      _phoneController.text = phoneCandidate;
+      _phoneController.text = _stripCountryCode(phoneCandidate);
     }
 
     final existingResponder = responderProvider.responders
@@ -133,7 +150,7 @@ class _ResponderRegistrationScreenState
         _nameController.text = profile.name;
       }
       if (_phoneController.text.trim().isEmpty) {
-        _phoneController.text = profile.phoneNumber;
+        _phoneController.text = _stripCountryCode(profile.phoneNumber);
       }
       if (_skills.contains(profile.skillsArea)) {
         _selectedSkill = profile.skillsArea;
@@ -141,7 +158,25 @@ class _ResponderRegistrationScreenState
       if (_responderTypes.contains(profile.responderType)) {
         _responderType = profile.responderType;
       }
-      setState(() {});
+    }
+
+    if (_phoneController.text.trim().isEmpty) {
+      _requestPhoneNumberHint();
+    }
+    setState(() {});
+  }
+
+  Future<void> _requestPhoneNumberHint() async {
+    if (!mounted) return;
+    try {
+      final number = await GooglePhoneNumberHint().getMobileNumber();
+      if (number != null && mounted && _phoneController.text.trim().isEmpty) {
+        setState(() {
+          _phoneController.text = _stripCountryCode(number);
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to get phone number hint: $e');
     }
   }
 
@@ -157,48 +192,55 @@ class _ResponderRegistrationScreenState
       type: FileType.custom,
       allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
       lockParentWindow: true,
+      withData: true,
     );
-
     if (result != null && result.files.isNotEmpty) {
       setState(() {
         _selectedFile = result.files.first;
+        if (_selectedFile != null && _selectedFile!.extension != 'pdf') {
+          _selectedXFile = XFile.fromData(_selectedFile!.bytes!, name: _selectedFile!.name);
+        } else {
+          _selectedXFile = null;
+        }
       });
     }
   }
 
   Future<void> _uploadIdDocument() async {
     final settings = context.read<AppSettingsProvider>();
-
     if (_selectedFile == null) {
       _showMessage(settings.t('prompt_select_document_first'));
       return;
     }
-
     final authProvider = context.read<AuthProvider>();
     final user = authProvider.currentUser;
     if (user == null) {
       _showMessage(settings.t('prompt_sign_in_first'));
       return;
     }
-
     setState(() {
       _isUploadingDocument = true;
     });
-
     try {
-      final file = File(_selectedFile!.path!);
-      final fileExtension = _selectedFile!.name.split('.').last;
-      final fileName = '${user.id}_id_document_${DateTime.now().millisecondsSinceEpoch}.$fileExtension';
-      final storageRef = FirebaseStorage.instance.ref().child('responder_documents/$fileName');
-
-      await storageRef.putFile(file);
-      final url = await storageRef.getDownloadURL();
-
+      String? url;
+      if (_selectedXFile != null) {
+        // Use MediaUploadService for images
+        final mediaService = MediaUploadService.fromEnvironment();
+        url = await mediaService.uploadEmergencyImage(image: _selectedXFile!, userId: user.id);
+      } else if (_selectedFile != null && _selectedFile!.extension == 'pdf') {
+        // For PDFs, fallback to Firebase Storage
+        final file = File(_selectedFile!.path!);
+        final fileExtension = _selectedFile!.name.split('.').last;
+        final fileName = '${user.id}_id_document_${DateTime.now().millisecondsSinceEpoch}.$fileExtension';
+        final storageRef = FirebaseStorage.instance.ref().child('responder_documents/$fileName');
+        await storageRef.putFile(file);
+        url = await storageRef.getDownloadURL();
+      }
       setState(() {
         _uploadedDocumentUrl = url;
         _selectedFile = null;
+        _selectedXFile = null;
       });
-
       if (mounted) {
         _showMessage(settings.t('document_uploaded_successfully'));
       }
@@ -219,6 +261,7 @@ class _ResponderRegistrationScreenState
   void _clearDocument() {
     setState(() {
       _selectedFile = null;
+      _selectedXFile = null;
       _uploadedDocumentUrl = null;
     });
   }
@@ -443,26 +486,35 @@ class _ResponderRegistrationScreenState
         child:Text(settings.t('label_phone_number'),style: TextStyle(fontWeight: FontWeight.bold,color: Colors.red[300]),)
       ),
       // 🔹 Phone Field
-      TextFormField(
-        controller: _phoneController,
-        keyboardType: TextInputType.phone,
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: Colors.grey.shade100,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
+      Row(
+        children: [
+          Expanded(
+            child: IntlPhoneField(
+              controller: _phoneController,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: Colors.grey.shade100,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              initialCountryCode: 'IN', // Default to India or handle via location
+              onChanged: (PhoneNumber phone) {
+                // _phoneController.text handles the rest, but you can capture phone.completeNumber if needed
+              },
+              validator: (value) {
+                if (value == null || _phoneController.text.trim().isEmpty) {
+                  return settings.t('error_please_enter_phone');
+                }
+                if (_phoneController.text.trim().length < 8) {
+                  return settings.t('error_valid_phone_number');
+                }
+                return null;
+              },
+            ),
           ),
-        ),
-        validator: (value) {
-          if (value == null || value.trim().isEmpty) {
-            return settings.t('error_please_enter_phone');
-          }
-          if (value.trim().length < 8) {
-            return settings.t('error_valid_phone_number');
-          }
-          return null;
-        },
+        ],
       ),
 
       const SizedBox(height: 16),
@@ -566,8 +618,35 @@ class _ResponderRegistrationScreenState
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      _selectedFile?.name ??
-                          settings.t('label_document_name'),
+                      _selectedFile?.name ?? settings.t('label_document_name'),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: _clearDocument,
+                  )
+                ],
+              )
+            else if (_selectedFile != null)
+              Row(
+                children: [
+                  if (_selectedXFile != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: Image.memory(
+                        _selectedFile!.bytes!,
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                      ),
+                    )
+                  else
+                    const Icon(Icons.picture_as_pdf, size: 40, color: Colors.red),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _selectedFile?.name ?? settings.t('label_document_name'),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   IconButton(
@@ -582,8 +661,7 @@ class _ResponderRegistrationScreenState
                   OutlinedButton.icon(
                     onPressed: _pickIdDocument,
                     icon: const Icon(Icons.attach_file),
-                    label:
-                        Text(settings.t('button_select_document')),
+                    label: Text(settings.t('button_select_document')),
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size(double.infinity, 48),
                       shape: RoundedRectangleBorder(
@@ -593,15 +671,12 @@ class _ResponderRegistrationScreenState
                   ),
                   const SizedBox(height: 10),
                   ElevatedButton.icon(
-                    onPressed: _isUploadingDocument
-                        ? null
-                        : _uploadIdDocument,
+                    onPressed: _isUploadingDocument ? null : _uploadIdDocument,
                     icon: _isUploadingDocument
                         ? const SizedBox(
                             height: 18,
                             width: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2),
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.cloud_upload),
                     label: Text(

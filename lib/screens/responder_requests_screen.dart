@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../core/models/emergency_request_model.dart';
 import '../core/models/responder_model.dart';
@@ -30,30 +28,16 @@ class ResponderRequestsScreen extends StatefulWidget {
 }
 
 class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
-  final AudioPlayer _voicePlayer = AudioPlayer();
-  String? _activeVoiceUrl;
-  bool _isVoicePlaying = false;
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refresh();
     });
-
-    _voicePlayer.onPlayerComplete.listen((_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isVoicePlaying = false;
-      });
-    });
   }
 
   @override
   void dispose() {
-    _voicePlayer.dispose();
     super.dispose();
   }
 
@@ -99,36 +83,6 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
     );
   }
 
-  Future<void> _openAttachment(String url) async {
-    final uri = Uri.parse(url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
-        mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open attachment.')),
-      );
-    }
-  }
-
-  Future<void> _toggleRemoteVoicePlayback(String url) async {
-    final isSameTrack = _activeVoiceUrl == url;
-    if (isSameTrack && _isVoicePlaying) {
-      await _voicePlayer.stop();
-      if (mounted) {
-        setState(() {
-          _isVoicePlaying = false;
-        });
-      }
-      return;
-    }
-
-    await _voicePlayer.play(UrlSource(url));
-    if (mounted) {
-      setState(() {
-        _activeVoiceUrl = url;
-        _isVoicePlaying = true;
-      });
-    }
-  }
 
   IconData _severityIcon(String severity) {
     switch (severity.toLowerCase()) {

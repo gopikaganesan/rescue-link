@@ -7,7 +7,6 @@ import '../core/providers/auth_provider.dart';
 import '../services/chat_service.dart';
 import '../widgets/account_sheet.dart';
 import '../widgets/fixed_footer_navigation_bar.dart';
-import '../widgets/translated_text.dart';
 import 'auth_screen.dart';
 import 'group_chat_screen.dart';
 import 'home_screen.dart';

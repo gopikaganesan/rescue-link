@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 import '../core/models/responder_model.dart';
 import '../core/providers/app_settings_provider.dart';
 import '../core/utils/chat_message_utils.dart';
-
+import '../core/providers/auth_provider.dart';
 class ResponderProfileScreen extends StatefulWidget {
   final ResponderModel responder;
   final double? viewerLatitude;
@@ -231,7 +231,6 @@ await showDialog<void>(
               /// 🔘 Actions (modern buttons)
               Row(
                 children: [
-
                   /// Delete (if exists)
                   if (hasExistingReview)
                     Expanded(
@@ -265,27 +264,11 @@ await showDialog<void>(
                         style: TextButton.styleFrom(
                           foregroundColor: Colors.red,
                         ),
-                        child: Text(settings.t('menu_delete_chat')),
+                        child: const Text('Delete'),
                       ),
                     ),
 
                   if (hasExistingReview) const SizedBox(width: 8),
-
-                  /// Cancel
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed:
-                          isSubmitting ? null : () => Navigator.pop(ctx),
-                      style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(settings.t('profile_cancel')),
-                    ),
-                  ),
-
-                  const SizedBox(width: 8),
 
                   /// Save
                   Expanded(
@@ -355,10 +338,27 @@ await showDialog<void>(
                                 strokeWidth: 2,
                               ),
                             )
-                          : Text(settings.t('profile_save_review')),
+                          : const Text('Save'),
                     ),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 8),
+
+              /// Cancel
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed:
+                      isSubmitting ? null : () => Navigator.pop(ctx),
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(settings.t('profile_cancel')),
+                ),
               ),
             ],
           ),
@@ -378,11 +378,18 @@ await showDialog<void>(
   ) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.red.shade100),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+          border: Border.all(color: Colors.grey.shade100),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -401,6 +408,10 @@ await showDialog<void>(
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
+    final auth = context.watch<AuthProvider>();
+    final currentUserId = widget.currentUserId ?? auth.currentUser?.id;
+    final isCurrentUserProfile = widget.isCurrentUserProfile || (currentUserId == widget.responder.id);
+
     final isAi = widget.responder.id == 'rescuelink_ai';
     final responderDisplayName = isAi
         ? settings.t('chat_rescue_link_ai')
@@ -412,9 +423,9 @@ await showDialog<void>(
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isCurrentUserProfile
+          isCurrentUserProfile
               ? settings.t('profile_my_responder_profile')
-              : (isAi ? settings.t('profile_ai_assistant') : settings.t('profile_responder_profile')),style:TextStyle(fontWeight:FontWeight.bold),
+              : (isAi ? settings.t('profile_ai_assistant') : settings.t('profile_responder_profile')),style:const TextStyle(fontWeight:FontWeight.bold),
         ),
       ),
       body: StreamBuilder<QuerySnapshot>(
@@ -580,7 +591,7 @@ await showDialog<void>(
                         ),
                   ),
                   const SizedBox(height: 12),
-                  if (widget.isCurrentUserProfile)
+                  if (isCurrentUserProfile)
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -591,24 +602,38 @@ await showDialog<void>(
                       child: Text(settings.t('profile_this_is_your_view')),
                     )
                   else
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
+                    Row(
                       children: [
-                        SizedBox(
-                          width: 160,
+                        Expanded(
                           child: ElevatedButton.icon(
                             onPressed: () => _callResponder(context),
                             icon: const Icon(Icons.call),
                             label: Text(settings.t('profile_call')),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              backgroundColor: Colors.red.shade600,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              elevation: 2,
+                            ),
                           ),
                         ),
-                        SizedBox(
-                          width: 160,
+                        const SizedBox(width: 12),
+                        Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () => _messageResponder(context),
                             icon: const Icon(Icons.message),
                             label: Text(settings.t('profile_message')),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              foregroundColor: Colors.red.shade700,
+                              side: BorderSide(color: Colors.red.shade400, width: 1.5),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -626,7 +651,7 @@ await showDialog<void>(
         overflow: TextOverflow.ellipsis, // ✅ prevents overflow
       ),
     ),
-    if (!widget.isCurrentUserProfile && widget.currentUserId != null)
+    if (!isCurrentUserProfile && currentUserId != null)
       TextButton.icon(
         onPressed: _showReviewAndRatingDialog,
         icon: const Icon(Icons.add_reaction_outlined, color: Colors.red),

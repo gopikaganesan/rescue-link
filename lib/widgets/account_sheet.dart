@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../core/providers/app_settings_provider.dart';
 import '../core/providers/auth_provider.dart';
+import '../core/providers/responder_provider.dart';
+import '../screens/responder_profile_screen.dart';
 
 Future<void> showAccountSheet(
   BuildContext context, {
@@ -99,35 +101,57 @@ Future<void> showAccountSheet(
                 ),
               ),
             ),
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  child: Text(
-                    displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
-                    style: const TextStyle(fontSize: 20),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        displayName,
-                        style: Theme.of(context).textTheme.titleLarge,
+            GestureDetector(
+              onTap: () {
+                if (user.isResponder) {
+                  final responder = context.read<ResponderProvider>().responderForUserId(user.id);
+                  if (responder != null) {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ResponderProfileScreen(
+                          responder: responder,
+                          isCurrentUserProfile: true,
+                        ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        user.email.isEmpty
-                            ? (user.phoneNumber ?? settings.t('auth_no_email'))
-                            : user.email,
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    ],
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(settings.t('error_profile_not_found'))),
+                    );
+                  }
+                }
+              },
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    child: Text(
+                      displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
+                      style: const TextStyle(fontSize: 20),
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user.email.isEmpty
+                              ? (user.phoneNumber ?? settings.t('auth_no_email'))
+                              : user.email,
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             Chip(

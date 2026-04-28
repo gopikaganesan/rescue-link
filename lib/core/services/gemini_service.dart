@@ -35,6 +35,8 @@ class CrisisAnalysis {
 class GeminiService {
   static const String _fallbackSkill = 'General Support';
   static const List<String> _defaultModelCandidates = <String>[
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
     'gemini-2.5-flash',
     'gemini-2.5-flash-lite',
     'gemini-2.5-pro',
@@ -45,6 +47,7 @@ class GeminiService {
     'gemini-1.5-flash-latest',
     'gemini-1.5-pro-latest',
     'gemini-flash-latest',
+    'gemini-pro',
   ];
   static const Duration _geminiTimeout = Duration(seconds: 12);
   final String _apiKey;

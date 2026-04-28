@@ -1802,7 +1802,6 @@ class ChatService {
     final videoAllowlistSection = _crisisTypeToYoutubeVideoId.entries
         .map((e) => '- ${e.key}: ${e.value}')
         .join('\n');
-    final allTrustedIds = _crisisTypeToYoutubeVideoId.values.toSet();
 
     return '''
 You are RescueLink AI assisting in an emergency group chat.

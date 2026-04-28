@@ -34,19 +34,34 @@ class _TranslatedTextState extends State<TranslatedText> {
   @override
   void initState() {
     super.initState();
-    _displayText = widget.text.trim().isEmpty
-        ? (widget.fallback ?? widget.text)
-        : widget.text;
+    _initDisplayText();
     WidgetsBinding.instance.addPostFrameCallback((_) => _refreshTranslation());
+  }
+
+  void _initDisplayText() {
+    final source = widget.text.trim().isEmpty ? (widget.fallback ?? widget.text) : widget.text;
+    try {
+      final languageCode = context.read<AppSettingsProvider>().languageCode.trim().toLowerCase();
+      if (languageCode.isEmpty || languageCode == 'en') {
+        _displayText = source;
+      } else {
+        final key = '$languageCode|$source';
+        if (_cache.containsKey(key)) {
+          _displayText = _cache[key]!;
+        } else {
+          _displayText = source;
+        }
+      }
+    } catch (_) {
+      _displayText = source;
+    }
   }
 
   @override
   void didUpdateWidget(covariant TranslatedText oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.text != widget.text || oldWidget.fallback != widget.fallback) {
-      _displayText = widget.text.trim().isEmpty
-          ? (widget.fallback ?? widget.text)
-          : widget.text;
+      _initDisplayText();
       _refreshTranslation();
     }
   }
