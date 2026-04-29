@@ -12,6 +12,7 @@ import 'package:record/record.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:torch_light/torch_light.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import '../core/providers/app_settings_provider.dart';
 import '../core/providers/auth_provider.dart';
 import '../core/providers/comms_provider.dart';
@@ -34,6 +35,8 @@ import 'responder_requests_screen.dart';
 import 'map_screen.dart';
 import '../widgets/account_sheet.dart';
 import '../widgets/sos_button.dart';
+import '../services/chat_service.dart';
+import '../core/utils/chat_message_utils.dart';
 
 enum _HomeHeaderMenuOption {
   language,
@@ -62,7 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final Map<String, String> _lastSeenChatMessageIdBySosId = <String, String>{};
   String? _chatWatcherUserId;
   final Set<String> _notifiedRequestIds = <String>{};
-  String _lastDeliveryRoute = '';
   String? _currentSosRequestId; // Track current SOS for cancellation
   bool _isSosDialogVisible = false;
   bool _isSosCancelRequested = false;
@@ -82,12 +84,14 @@ class _HomeScreenState extends State<HomeScreen> {
   XFile? _selectedImage;
   String? _voiceTranscript;
   String? _voiceAudioPath;
+  StreamSubscription? _intentDataStreamSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeScreen();
+      _setupShareIntentListener();
     });
     _initializeSpeech();
     _configureVoiceTestTts();
@@ -106,6 +110,20 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    _intentDataStreamSubscription?.cancel();
+    _voicePreviewCompleteSub?.cancel();
+    _responderPollingTimer?.cancel();
+    _stopOpenAppChatNotificationWatchers();
+    _flutterTts.stop();
+    _speechToText.stop();
+    _audioRecorder.dispose();
+    _voicePreviewPlayer.dispose();
+    _emergencyContextController.dispose();
+    super.dispose();
+  }
+
   /// Initialize location and responder data
   Future<void> _initializeScreen() async {
     final locationProvider = context.read<LocationProvider>();
@@ -119,6 +137,219 @@ class _HomeScreenState extends State<HomeScreen> {
     await _syncPushProfile();
     _startResponderAlertPolling();
     _startOpenAppChatNotificationWatchers();
+  }
+
+  void _setupShareIntentListener() {
+    // For sharing or opening urls/text coming from outside the app while the app is in the memory
+    _intentDataStreamSubscription =
+        ReceiveSharingIntent.instance.getMediaStream().listen((value) {
+      if (value.isNotEmpty) {
+        final text = value.first.path;
+        _handleSharedText(text);
+      }
+    }, onError: (err) {
+      debugPrint("getMediaStream error: $err");
+    });
+
+    // For sharing or opening urls/text coming from outside the app while the app is closed
+    ReceiveSharingIntent.instance.getInitialMedia().then((value) {
+      if (value.isNotEmpty) {
+        final text = value.first.path;
+        _handleSharedText(text);
+        // Reset the initial intent so it doesn't trigger again on every revisit
+        ReceiveSharingIntent.instance.reset();
+      }
+    });
+  }
+
+  void _handleSharedText(String text) {
+    if (!mounted) {
+      return;
+    }
+    // Deep detect if it's a youtube link
+    final youtubeIds = extractYoutubeVideoIds(text);
+    if (youtubeIds.isEmpty && !text.contains('http')) {
+      return;
+    }
+
+    _showChatSelectionDialog(text);
+  }
+
+  void _showChatSelectionDialog(String sharedText) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final auth = context.read<AuthProvider>();
+        final me = auth.currentUser;
+        if (me == null) return const SizedBox.shrink();
+
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('chats')
+              .where('participantUids', arrayContains: me.id)
+              .where('status', isEqualTo: 'active')
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final chats = snapshot.data!.docs;
+            if (chats.isEmpty) {
+              return AlertDialog(
+                title: const Text('No Active Chats'),
+                content: const Text('You need an active emergency chat to share this link.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('OK'),
+                  ),
+                ],
+              );
+            }
+
+            return AlertDialog(
+              title: const Text('Share to Chat'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: chats.length,
+                  itemBuilder: (context, index) {
+                    final chat = chats[index];
+                    final chatData = chat.data();
+                    final sosId = chat.id;
+
+                    final overview = chatData['sosOverview'] is Map 
+                        ? Map<String, dynamic>.from(chatData['sosOverview'] as Map) 
+                        : <String, dynamic>{};
+                    final crisisType = ((overview['crisisType'] as String?) ??
+                            (chatData['crisisType'] as String?) ??
+                            '').trim();
+
+                    String victimName = 'Victim';
+                    final participants = chatData['participants'];
+                    if (participants is List) {
+                      for (final entry in participants.whereType<Map>()) {
+                        final role = ((entry['role'] as String?) ?? '').toLowerCase();
+                        final displayName = (entry['displayName'] as String?)?.trim() ?? '';
+                        if (role == 'victim' && displayName.isNotEmpty) {
+                          if (displayName.toLowerCase() != 'victim') {
+                            victimName = displayName;
+                            break;
+                          }
+                        }
+                      }
+                    }
+
+                    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      future: FirebaseFirestore.instance
+                          .collection('emergency_requests')
+                          .doc(sosId)
+                          .get(),
+                      builder: (context, sosSnapshot) {
+                        if (sosSnapshot.connectionState == ConnectionState.waiting) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.grey.shade200),
+                            ),
+                            child: const ListTile(
+                              title: Text('Loading emergency details...'),
+                              leading: Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+
+                        final sosData = sosSnapshot.data?.data() ?? {};
+                        final category = (sosData['category'] as String? ?? crisisType).trim();
+                        final victimNameFromSos = sosData['requesterName'] as String? ?? 
+                            sosData['victimName'] as String?;
+                        final displayVictimName = (victimNameFromSos != null && victimNameFromSos.trim().isNotEmpty) 
+                            ? victimNameFromSos.trim() 
+                            : victimName;
+
+                        final emoji = switch (category.toLowerCase()) {
+                          'fire emergency' || 'fire' => '🔥',
+                          'medical emergency' || 'medical' || 'medical safety emergency' => '🚑',
+                          'search and rescue' || 'search & rescue' => '🚁',
+                          'disaster response' || 'disaster evacuation' || 'disaster' => '🌪️',
+                          'police/security' || 'security' => '🚓',
+                          'women safety' || 'women' => '🛡️',
+                          'child safety' || 'child' => '🧸',
+                          'elderly assistance' || 'elderly assist' || 'elderly' => '🦽',
+                          'shelter & evacuation' || 'shelter' => '⛺',
+                          'food & water supply' || 'food' => '🍲',
+                          'essential supply need' || 'essential medicines' || 'medicine' => '💊',
+                          'water rescue emergency' => '🏊',
+                          'railway hazard emergency' => '🚂',
+                          'entrapment rescue' => '🪜',
+                          'animal/insect attack' => '🐝',
+                          'general emergency' || 'general support' || 'general' => '🆘',
+                          _ => '🆘',
+                        };
+
+                        final titleText = '$emoji $displayVictimName';
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.red.shade100),
+                          ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.white,
+                              child: Text(emoji, style: const TextStyle(fontSize: 20)),
+                            ),
+                            title: Text(
+                              titleText,
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 4.0),
+                              child: Text('ID: ${sosId.substring(0, 8)}...'),
+                            ),
+                        trailing: Icon(Icons.chevron_right, color: Colors.red.shade300),
+                        onTap: () async {
+                          final chatService = ChatService();
+                          await chatService.sendMessage(
+                            sosId: sosId,
+                            senderUid: me.id,
+                            senderName: me.displayName,
+                            senderRole: me.isResponder ? 'responder' : 'victim',
+                            text: sharedText,
+                          );
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Link shared to chat.')),
+                            );
+                          }
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _initializeSpeech() async {
@@ -260,7 +491,8 @@ class _HomeScreenState extends State<HomeScreen> {
           .replaceAll('{severity}', request.severity.toUpperCase());
       final body = settings
           .t('notification_new_nearby_sos_body')
-          .replaceAll('{category}', settings.localizedCrisisCategory(request.category))
+          .replaceAll(
+              '{category}', settings.localizedCrisisCategory(request.category))
           .replaceAll('{skill}', request.recommendedSkill)
           .replaceAll('{distance}', distance.toStringAsFixed(1));
 
@@ -443,12 +675,16 @@ class _HomeScreenState extends State<HomeScreen> {
         _currentSosRequestId = requestId;
         context.read<SosStatusProvider>().setActiveSos(requestId);
 
-        // Track the route (for UI feedback)
-        _lastDeliveryRoute = commsProvider.resolveDeliveryRoute(
-          settings: appSettings,
-          cloudWriteSucceeded: true,
-          hasNearbyResponders: responderProvider.nearbyResponders.isNotEmpty,
+        // Populate nearby responders based on the triggered SOS analysis
+        final analysis = crisisProvider.latestAnalysis;
+        responderProvider.findNearbyResponders(
+          locationProvider.latitude!,
+          locationProvider.longitude!,
+          ResponderMatchingService.radiusKmForSeverity(
+              analysis?.severity ?? 'medium'),
+          requiredSkill: analysis?.recommendedSkill,
         );
+
 
         _showSOSConfirmation();
       } else if (_isSosCancelRequested) {
@@ -459,7 +695,8 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (!mounted) return;
       _showSnackBar(
-        context.read<AppSettingsProvider>()
+        context
+            .read<AppSettingsProvider>()
             .t('snackbar_sos_error')
             .replaceAll('{error}', e.toString()),
       );
@@ -553,222 +790,233 @@ class _HomeScreenState extends State<HomeScreen> {
     final messenger = ScaffoldMessenger.of(context);
 
     _isSosDialogVisible = true;
+
+    Widget _infoRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Text("$label: $value"),
+  );
+}
+
+Widget _actionBtn(String text, IconData icon, Color color, VoidCallback onTap) {
+  return ElevatedButton.icon(
+    onPressed: onTap,
+    icon: Icon(icon),
+    label: Text(text),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: color,
+      foregroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+    ),
+  );
+}
+
     showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: Colors.green.shade50,
-        title: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 28),
-            const SizedBox(width: 8),
-            Expanded(child: Text(settings.t('status_sos_received'))),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+  context: context,
+  barrierDismissible: false,
+  builder: (dialogContext) => Dialog(
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+  color: Colors.white,
+  borderRadius: BorderRadius.circular(20),
+  boxShadow: [
+    BoxShadow(
+      color: Colors.black.withOpacity(0.08),
+      blurRadius: 12,
+    ),
+  ],
+),
+      constraints: const BoxConstraints(maxHeight: 600),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          /// 🔝 HEADER
+          Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: Colors.green.shade100,
-                  border: Border.all(color: Colors.green, width: 2),
-                  borderRadius: BorderRadius.circular(8),
+                  shape: BoxShape.circle,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'SOS has been broadcast to nearby responders.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                child: const Icon(Icons.check, color: Colors.green),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  settings.t('status_sos_received'),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          /// 📦 CONTENT
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  /// STATUS CARD
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.green.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'SOS broadcasted successfully',
+                          style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Colors.green.shade800,
                           ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '📍 ${locationProvider.latitude?.toStringAsFixed(4)}, '
+                          '${locationProvider.longitude?.toStringAsFixed(4)}',
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  /// RESPONDERS
+                  Row(
+                    children: [
+                      const Icon(Icons.people, size: 18),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Nearby Responders: ${responderProvider.nearbyResponders.length}',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ],
+                  ),
+
+                  if (responderProvider.nearbyResponders.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        settings.t('no_nearby_responders_hint'),
+                        style: TextStyle(color: Colors.orange.shade700),
+                      ),
+                    ),
+
+                  /// 🤖 AI SECTION
+                  if (analysis != null) ...[
+                    const SizedBox(height: 16),
+                    Divider(),
+
                     Text(
-                      'Location: ${locationProvider.latitude?.toStringAsFixed(4)}, '
-                      '${locationProvider.longitude?.toStringAsFixed(4)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Nearby Responders: ${responderProvider.nearbyResponders.length}',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              if (responderProvider.nearbyResponders.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Text(
-                    'ℹ️ ${settings.t('no_nearby_responders_hint')}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: Colors.orange[800]),
-                  ),
-                ),
-              if (analysis != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  settings.t('analysis_results'),
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${settings.t('category_label')}: ${settings.localizedCrisisCategory(analysis.category)}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                Text(
-                  '${settings.t('severity_label')}: ${analysis.severity}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (_forceCriticalSeverity)
-                  Text(
-                    settings.t('manual_override_critical'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.red.shade800,
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                Text(
-                  '${settings.t('skill_match')}: ${settings.localizedSkill(analysis.recommendedSkill)}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (analysis.confidence > 0)
-                  Text(
-                    'AI confidence: ${(analysis.confidence * 100).toStringAsFixed(0)}%',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                if (analysis.humanReviewRecommended)
-                  Text(
-                    settings.t('human_review_recommended'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.orange.shade800,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                if (analysis.suggestedActions.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    settings.t('recommended_actions'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  ...analysis.suggestedActions.take(3).map(
-                        (action) => Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Text('• $action',
-                              style: Theme.of(context).textTheme.bodySmall),
-                        ),
-                      ),
-                ],
-                if (analysis.offlineMode)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8.0),
-                    child: Text(
-                      '🔌 ${settings.t('offline_mode_active')}',
+                      "AI Analysis",
                       style: Theme.of(context)
                           .textTheme
-                          .bodySmall
-                          ?.copyWith(color: Colors.orange[800]),
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
                     ),
-                  ),
-              ],
-              const SizedBox(height: 8),
-              if (_lastDeliveryRoute.isNotEmpty)
-                Text(
-                  '${settings.t('label_route')}: $_lastDeliveryRoute',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.grey[600],
+
+                    const SizedBox(height: 8),
+
+                    _infoRow("Category",
+                        settings.localizedCrisisCategory(analysis.category)),
+                    _infoRow("Severity", analysis.severity),
+                    _infoRow("Skill",
+                        settings.localizedSkill(analysis.recommendedSkill)),
+
+                    if (analysis.confidence > 0)
+                      _infoRow("Confidence",
+                          "${(analysis.confidence * 100).toStringAsFixed(0)}%"),
+
+                    if (analysis.humanReviewRecommended)
+                      Text(
+                        "⚠ Human review recommended",
+                        style: TextStyle(color: Colors.orange.shade800),
                       ),
+
+                    if (analysis.suggestedActions.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text("Actions",
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      ...analysis.suggestedActions.take(3).map(
+                            (e) => Text("• $e"),
+                          ),
+                    ],
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          /// 🔘 ACTIONS (WRAPPED)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              _actionBtn(
+                "Cancel",
+                Icons.close,
+                Colors.red,
+                () => _cancelCurrentSosRequest(
+                  _currentSosRequestId,
+                  dialogContext,
+                  emergencyRequestProvider,
+                  messenger,
                 ),
+              ),
+              _actionBtn(
+                "Map",
+                Icons.map,
+                Colors.grey.shade500,
+                () {
+                  Navigator.pop(dialogContext);
+                  _openMap();
+                },
+              ),
+              if (_currentSosRequestId != null)
+                _actionBtn(
+                  "Chat",
+                  Icons.chat,
+                  Colors.grey.shade500,
+                  () {
+                    Navigator.pop(dialogContext);
+                    _openCurrentSosChat();
+                  },
+                ),
+              _actionBtn(
+                "Call",
+                Icons.call,
+                Colors.red,
+                () async {
+                  Navigator.pop(dialogContext);
+                  await _makeEmergencyCall();
+                },
+              ),
             ],
           ),
-        ),
-        actions: [
-          // Cancel SOS - prominent red button
-          ElevatedButton.icon(
-            onPressed: () => _cancelCurrentSosRequest(
-              _currentSosRequestId,
-              dialogContext,
-              emergencyRequestProvider,
-              messenger,
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade600,
-              foregroundColor: Colors.white,
-            ),
-            icon: const Icon(Icons.close),
-            label: Text(
-                context.read<AppSettingsProvider>().t('button_cancel_sos')),
-          ),
-          const SizedBox(width: 8),
-          // View Map button
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              _openMap();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade600,
-              foregroundColor: Colors.white,
-            ),
-            icon: const Icon(Icons.map),
-            label:
-                Text(context.read<AppSettingsProvider>().t('button_view_map')),
-          ),
-          if (_currentSosRequestId != null) ...[
-            const SizedBox(width: 8),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _openCurrentSosChat();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green.shade700,
-                foregroundColor: Colors.white,
-              ),
-              icon: const Icon(Icons.chat_bubble_outline),
-              label: Text(
-                  context.read<AppSettingsProvider>().t('button_open_chat')),
-            ),
-          ],
-          if (responderProvider.nearbyResponders.isEmpty) ...[
-            const SizedBox(width: 8),
-            // Call Emergency button
-            ElevatedButton.icon(
-              onPressed: () async {
-                Navigator.pop(dialogContext);
-                await _makeEmergencyCall();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange.shade600,
-                foregroundColor: Colors.white,
-              ),
-              icon: const Icon(Icons.call),
-              label: Text(context
-                  .read<AppSettingsProvider>()
-                  .t('button_call_emergency')),
-            ),
-          ],
         ],
       ),
-    ).then((_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isSosDialogVisible = false;
-      });
-    });
+    ),
+  ),
+).then((_) { if (!mounted) { return; } setState(() { _isSosDialogVisible = false; }); });
 
     _announce(context.read<AppSettingsProvider>().t('status_sos_activated'));
   }
@@ -793,7 +1041,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _currentSosRequestId = null;
     dialogNavigator.pop();
     messenger.showSnackBar(
-      SnackBar(content: Text(context.read<AppSettingsProvider>().t('snackbar_sos_cancelled'))),
+      SnackBar(
+          content: Text(
+              context.read<AppSettingsProvider>().t('snackbar_sos_cancelled'))),
     );
   }
 
@@ -828,52 +1078,83 @@ class _HomeScreenState extends State<HomeScreen> {
       barrierDismissible: true,
       builder: (dialogContext) {
         final infoTextStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Colors.blueGrey.shade800,
+              color: Colors.green.shade900,
               fontSize: 14,
             );
 
-        return AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.info_outline, color: Colors.blue),
-              const SizedBox(width: 8),
-              Expanded(child: Text(settings.t('home_emergency_info_title'))),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.of(dialogContext).pop(),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildStatusRow(
-                icon: Icons.mic,
-                text: settings.t(voiceStatusKey),
-                style: infoTextStyle,
-              ),
-              const SizedBox(height: 10),
-              _buildStatusRow(
-                icon: Icons.smart_toy,
-                text: settings
-                    .t('home_ai_status')
-                    .replaceAll('{status}', aiStatusLabel),
-                style: infoTextStyle,
-              ),
-              const SizedBox(height: 10),
-              _buildStatusRow(
-                icon: Icons.wifi_off,
-                text: settings.t(fallbackStatusKey),
-                style: infoTextStyle,
-              ),
-              const SizedBox(height: 10),
-              _buildStatusRow(
-                icon: Icons.accessibility_new,
-                text: settings.t('home_emergency_info_accessibility_transcription'),
-                style: infoTextStyle,
-              ),
-            ],
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.green.shade300),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        settings.t('home_emergency_info_title'),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green.shade800,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () => Navigator.of(dialogContext).pop(),
+                      child: Icon(Icons.close, color: Colors.green.shade800, size: 24),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildStatusRow(
+                  icon: Icons.mic,
+                  text: settings.t(voiceStatusKey),
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+                const SizedBox(height: 12),
+                _buildStatusRow(
+                  icon: Icons.smart_toy,
+                  text: settings
+                      .t('home_ai_status')
+                      .replaceAll('{status}', aiStatusLabel),
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+                const SizedBox(height: 12),
+                _buildStatusRow(
+                  icon: commsProvider.forceOfflineAi ? Icons.wifi_off : Icons.cloud_done,
+                  text: settings.t(fallbackStatusKey),
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+                const SizedBox(height: 12),
+                _buildStatusRow(
+                  icon: Icons.accessibility_new,
+                  text: settings.t('home_emergency_info_accessibility_status'),
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+                const SizedBox(height: 12),
+                _buildStatusRow(
+                  icon: Icons.transcribe,
+                  text: 'Transcription status available',
+                  style: infoTextStyle,
+                  iconColor: Colors.green.shade700,
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -884,12 +1165,13 @@ class _HomeScreenState extends State<HomeScreen> {
     required IconData icon,
     required String text,
     required TextStyle? style,
+    Color? iconColor,
   }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: Colors.blue.shade700),
-        const SizedBox(width: 10),
+        Icon(icon, size: 20, color: iconColor ?? Colors.red.shade700),
+        const SizedBox(width: 12),
         Expanded(
           child: Text(
             text,
@@ -899,6 +1181,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ],
     );
   }
+
+
 
   /// Show snackbar message
   void _showSnackBar(String message) {
@@ -919,48 +1203,128 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showAboutAppDialog() {
     final settings = context.read<AppSettingsProvider>();
 
+Widget _featureItem(IconData icon, String text, Color color) {
+  return Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: color.withAlpha(30),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
     showDialog<void>(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
         return AlertDialog(
-          title: Text(settings.t('home_about_app_title')),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(settings.t('home_about_app_description')),
-                const SizedBox(height: 14),
-                Text('• ${settings.t('home_about_app_feature_sos')}'),
-                const SizedBox(height: 6),
-                Text('• ${settings.t('home_about_app_feature_ai')}'),
-                const SizedBox(height: 6),
-                Text('• ${settings.t('home_about_app_feature_accessibility')}'),
-                const SizedBox(height: 6),
-                Text('• ${settings.t('home_about_app_feature_resilience')}'),
-              ],
-            ),
+  backgroundColor: Colors.white,
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(16),
+  ),
+
+  title: Row(
+    children: [
+      Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(Icons.info_outline, color: Colors.blue.shade700),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Text(
+          settings.t('home_about_app_title'),
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
+    ],
+  ),
+
+  content: SingleChildScrollView(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 🔹 Description
+        Text(
+          settings.t('home_about_app_description'),
+          style: TextStyle(
+            color: Colors.grey.shade700,
+            height: 1.4,
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(settings.t('button_close')),
-            ),
-            TextButton(
-              onPressed: () async {
-                final uri = Uri.parse('https://github.com/gopikaganesan/rescue-link');
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                } else if (mounted) {
-                  _showSnackBar(settings.t('home_about_app_github_failed'));
-                }
-              },
-              child: Text(settings.t('home_about_app_github')),
-            ),
-          ],
-        );
+        ),
+
+        const SizedBox(height: 16),
+
+        // 🔹 Features
+        _featureItem(Icons.warning_amber_rounded,
+            settings.t('home_about_app_feature_sos'), Colors.red),
+
+        _featureItem(Icons.smart_toy,
+            settings.t('home_about_app_feature_ai'), Colors.blue),
+
+        _featureItem(Icons.accessibility_new,
+            settings.t('home_about_app_feature_accessibility'), Colors.green),
+
+        _featureItem(Icons.shield,
+            settings.t('home_about_app_feature_resilience'), Colors.orange),
+      ],
+    ),
+  ),
+
+  actionsPadding:
+      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+
+  actions: [
+    TextButton(
+      onPressed: () => Navigator.of(dialogContext).pop(),
+      child: Text(
+        settings.t('button_close'),
+        style: TextStyle(color: Colors.grey.shade700),
+      ),
+    ),
+
+    FilledButton.icon(
+      icon: const Icon(Icons.open_in_new, size: 18),
+      onPressed: () async {
+        final uri = Uri.parse(
+            'https://github.com/gopikaganesan/rescue-link');
+
+        try {
+          await launchUrl(uri,
+              mode: LaunchMode.externalApplication);
+        } catch (e) {
+          if (mounted) {
+            _showSnackBar(
+                settings.t('home_about_app_github_failed'));
+          }
+        }
+      },
+      label: Text(settings.t('home_about_app_github')),
+    ),
+  ],
+);
       },
     );
+
+    
   }
 
   void _openResponderRegistration() {
@@ -1000,7 +1364,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final auth = context.read<AuthProvider>();
     final user = auth.currentUser;
     if (user == null) {
-      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_sign_in_to_view_chats'));
+      _showSnackBar(context
+          .read<AppSettingsProvider>()
+          .t('snackbar_sign_in_to_view_chats'));
       return;
     }
 
@@ -1061,7 +1427,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _logoutRegisteredUser() async {
     await context.read<AuthProvider>().logout();
     if (mounted) {
-      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_signed_out'));
+      _showSnackBar(
+          context.read<AppSettingsProvider>().t('snackbar_signed_out'));
     }
   }
 
@@ -1147,12 +1514,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 horizontal: 16, vertical: 14),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? Colors.blue.withValues(alpha: 0.1)
+                                  ? Colors.red.withValues(alpha: 0.1)
                                   : Colors.grey.shade100,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
                                 color: isSelected
-                                    ? Colors.blue
+                                    ? Colors.red
                                     : Colors.transparent,
                               ),
                             ),
@@ -1210,6 +1577,15 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       onLogout: () async {
         await _logoutRegisteredUser();
+        if (!mounted) {
+          return;
+        }
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const AuthScreen(showGuestButton: false),
+          ),
+          (route) => false,
+        );
       },
       onOpenResponderRequests: _openResponderRequests,
       isResponderAvailable: authProvider.currentUser?.isResponder == true
@@ -1709,8 +2085,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final snackMessage =
-        context.read<AppSettingsProvider>().t(value ? 'snackbar_responder_online' : 'snackbar_responder_offline');
+    final snackMessage = context
+        .read<AppSettingsProvider>()
+        .t(value ? 'snackbar_responder_online' : 'snackbar_responder_offline');
 
     await responderProvider.setResponderAvailability(
       userId: userId,
@@ -1749,7 +2126,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _toggleVoiceInput() async {
     if (!_speechReady) {
-      _showSnackBar(context.read<AppSettingsProvider>().t('snackbar_voice_input_unavailable'));
+      _showSnackBar(context
+          .read<AppSettingsProvider>()
+          .t('snackbar_voice_input_unavailable'));
       return;
     }
 
@@ -2048,18 +2427,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _responderPollingTimer?.cancel();
-    _stopOpenAppChatNotificationWatchers();
-    _flutterTts.stop();
-    _speechToText.stop();
-    _audioRecorder.dispose();
-    _voicePreviewCompleteSub?.cancel();
-    _voicePreviewPlayer.dispose();
-    _emergencyContextController.dispose();
-    super.dispose();
-  }
+
 
   PageRouteBuilder<void> _noTransitionRoute(Widget page) {
     return PageRouteBuilder<void>(
@@ -2118,7 +2486,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(settings.t('app_title')),
+        title: Text(settings.t('app_title'),style:TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         elevation: 0,
         backgroundColor: Colors.red.shade700,
@@ -2131,9 +2499,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.language,
                 child: Row(
                   children: [
-                    const Icon(Icons.language, color: Colors.black87),
+                    const Icon(Icons.language, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('home_select_language')),
+                    Text(settings.t('home_select_language'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2141,9 +2509,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.accessibility,
                 child: Row(
                   children: [
-                    const Icon(Icons.accessibility_new, color: Colors.black87),
+                    const Icon(Icons.accessibility_new, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('title_accessibility')),
+                    Text(settings.t('title_accessibility'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2151,9 +2519,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.commsSimulation,
                 child: Row(
                   children: [
-                    const Icon(Icons.wifi_tethering, color: Colors.black87),
+                    const Icon(Icons.wifi_tethering, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('comms_simulation_title')),
+                    Text(settings.t('comms_simulation_title'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2161,9 +2529,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.viewSosHistory,
                 child: Row(
                   children: [
-                    const Icon(Icons.history, color: Colors.black87),
+                    const Icon(Icons.history, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('button_view_sos_history')),
+                    Text(settings.t('button_view_sos_history'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2171,9 +2539,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: _HomeHeaderMenuOption.aboutApp,
                 child: Row(
                   children: [
-                    const Icon(Icons.info_outline, color: Colors.black87),
+                    const Icon(Icons.info_outline, color: Colors.red),
                     const SizedBox(width: 8),
-                    Text(settings.t('button_about_app')),
+                    Text(settings.t('button_about_app'),style:TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2252,6 +2620,61 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ]));
                               })),
                           const SizedBox(height: 8),
+                          Consumer<LocationProvider>(
+                            builder: (context, locationProvider, _) {
+                              if (locationProvider.hasLocation) {
+                                return const SizedBox.shrink();
+                              }
+
+                              return Container(
+                                margin: const EdgeInsets.symmetric(vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.location_off,
+                                            color: Colors.orangeAccent,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              settings.t('location_not_ready'),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    _actionChip(
+                                      label: 'Fix',
+                                      onTap: () async {
+                                        if (!locationProvider.hasLocation) {
+                                          await locationProvider
+                                              .openPermissionSettings();
+                                        } else {
+                                          await locationProvider
+                                              .openLocationSettings();
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                           Consumer<AuthProvider>(
                             builder: (context, authProvider, _) {
                               final sosStatus =
@@ -2344,7 +2767,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               IconButton(
                                 icon: Icon(Icons.info_outline,
-                                    color: Colors.blue.shade700),
+                                    color: Colors.red.shade700),
                                 tooltip: 'Info',
                                 onPressed: _showEmergencyInfoBalloon,
                               ),
@@ -2364,96 +2787,84 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                           const SizedBox(height: 8),
-                          TextField(
-                            controller: _emergencyContextController,
-                            minLines: 1,
-                            maxLines: 3,
-                            cursorColor: Colors.red,
-                            decoration: InputDecoration(
-                              hintText:
-                                  settings.t('hint_emergency_details_example'),
-                              filled: true,
-                              fillColor: Colors.red.shade50,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide:
-                                    BorderSide(color: Colors.red.shade200),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(
-                                    color: Colors.red.shade300, width: 1.2),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(
-                                    color: Colors.red.shade600, width: 2),
-                              ),
-                              errorBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: const BorderSide(color: Colors.red),
-                              ),
-                              label: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.warning_amber_rounded,
-                                      color: Colors.black54, size: 18),
-                                  const SizedBox(width: 6),
-                                  Flexible(
-                                    child: Text(
-                                      settings.t(
-                                          'label_emergency_details_optional'),
-                                      style:
-                                          TextStyle(color: Colors.red.shade700),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              hintStyle: TextStyle(color: Colors.red.shade300),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              prefixIcon: IconButton(
-                                onPressed: _pickCameraImage,
-                                icon: const Icon(Icons.camera_alt),
-                                tooltip: settings.t('tooltip_capture_photo'),
-                              ),
-                              suffixIcon: SizedBox(
-                                width: 110,
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    IconButton(
-                                      tooltip: _isRecordingClip
-                                          ? settings
-                                              .t('tooltip_stop_voice_clip')
-                                          : settings
-                                              .t('tooltip_record_voice_clip'),
-                                      onPressed: _toggleVoiceClipRecording,
-                                      icon: Icon(
-                                        _isRecordingClip
-                                            ? Icons.stop_circle
-                                            : Icons.keyboard_voice_rounded,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: _isTranscribing
-                                          ? settings
-                                              .t('tooltip_stop_voice_to_text')
-                                          : settings.t('tooltip_voice_to_text'),
-                                      onPressed: _speechReady
-                                          ? _toggleVoiceInput
-                                          : null,
-                                      icon: Icon(_isTranscribing
-                                          ? Icons.stop
-                                          : Icons.transcribe),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
+                          Container(
+  padding: const EdgeInsets.all(10),
+  decoration: BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(20),
+    border: Border.all(color: Colors.red.shade200),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.05),
+        blurRadius: 8,
+        offset: const Offset(0, 3),
+      ),
+    ],
+  ),
+  child: Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+
+      // 🔴 TOP INPUT FIELD
+      TextField(
+        controller: _emergencyContextController,
+        minLines: 1,
+        maxLines: 3,
+        cursorColor: Colors.red,
+        decoration: InputDecoration(
+          hintText: settings.t('hint_emergency_details_example'),
+          hintStyle: TextStyle(color: Colors.red.shade300),
+
+          filled: true,
+          fillColor: Colors.red.shade50,
+
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
+
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 12,
+          ),
+
+          // 🎤 Voice-to-text
+          suffixIcon: IconButton(
+            icon: Icon(
+              _isTranscribing ? Icons.stop : Icons.mic_none,
+              color: Colors.red.shade700,
+            ),
+            onPressed: _speechReady ? _toggleVoiceInput : null,
+          ),
+        ),
+      ),
+
+      const SizedBox(height: 8),
+
+      // ⚫ BOTTOM ACTION ROW
+      Row(
+        children: [
+
+          _actionBtn(
+            icon: Icons.camera_alt_outlined,
+            onTap: _pickCameraImage,
+          ),
+
+          const SizedBox(width: 8),
+
+          _actionBtn(
+            icon: _isRecordingClip
+                ? Icons.stop_circle
+                : Icons.keyboard_voice_rounded,
+            onTap: _toggleVoiceClipRecording,
+            isActive: _isRecordingClip,
+          ),
+        ],
+      ),
+    ],
+  ),
+),
+                        
                           if (_selectedImage != null ||
                               (_voiceAudioPath != null &&
                                   _voiceAudioPath!.isNotEmpty)) ...[
@@ -2565,21 +2976,15 @@ Widget _actionCard({
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
             icon,
             size: 32,
             color: Colors.red.shade700,
           ),
           const SizedBox(height: 10),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.red.shade600,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
           Text(
             value,
             style: TextStyle(
@@ -2588,7 +2993,41 @@ Widget _actionCard({
               fontWeight: FontWeight.bold,
             ),
           ),
+            ]
+          ) ,
+          const SizedBox(height: 6),
+          Text(
+            title,
+            style: TextStyle(
+              color: Colors.red.shade600,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          
         ],
+      ),
+    ),
+  );
+}
+
+Widget _actionChip({
+  required String label,
+  required VoidCallback onTap,
+}) {
+  return GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     ),
   );
@@ -2630,6 +3069,27 @@ class DashedBorderPainter extends CustomPainter {
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => false;
 }
+
+Widget _actionBtn({
+  required IconData icon,
+  required VoidCallback onTap,
+  bool isActive = false,
+}) {
+  return Container(
+    height: 42,
+    width: 42,
+    decoration: BoxDecoration(
+      color: isActive ? Colors.red.shade600 : Colors.black,
+      shape: BoxShape.circle,
+    ),
+    child: IconButton(
+      icon: Icon(icon, size: 20),
+      color: Colors.white,
+      onPressed: onTap,
+    ),
+  );
+}
+
 
 Widget _buildSwitchCard({
   required String title,

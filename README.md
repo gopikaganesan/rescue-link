@@ -31,6 +31,32 @@ RescueLink instantly connects people in crisis to nearby responders and resource
 - Includes accessibility-first interaction patterns such as **high contrast**, **text scaling**, **voice transcription**, **screen-reader announcements**, and **language-aware chat translation**.
 - Realistic resilience is demonstrated through **offline simulation**, while the architecture remains ready for future physical mesh hardware integration.
 
+## 🛟 RescueLink - Quick Start Guide (For Judges & Testers)
+
+### 📥 1. Installation
+1. **Download & Install**: Download the `RescueLink.apk` and install it on an Android phone (enable "Install from unknown sources").
+2. **Setup**: Open the app and create an account or sign in.
+
+### 🧪 2. Recommended Testing Setup
+For the best experience, use **2-4 devices**:
+- **1 Phone**: Victim (Trigger SOS)
+- **2-3 Phones**: Responders (Log in with different accounts)
+
+### 🚦 3. Test Flow
+1. **Victim**: Trigger SOS via the big button, home screen widget, or voice command.
+2. **AI Analysis**: View the **Gemini AI triage** screen with automated category classification and suggested survival actions.
+3. **Responders**: Nearby responders will see the alert. Join the chat to coordinate.
+4. **Coordination**: Use the group chat to share location attachments (opens in Google Maps/Uber) and real-time messages.
+
+### 📝 Notes
+- **Real Backend**: Uses Firebase (Firestore + Cloud Messaging) for real-time synchronization.
+- **Accessibility**: Includes high-contrast mode, text scaling, and simplified SOS flow for elderly/disabled users.
+- **Hardware Ready**: Voice commands and widgets work best on physical Android devices.
+
+---
+Full technical setup: [github.com/gopikaganesan/rescue-link](https://github.com/gopikaganesan/rescue-link)  
+**ShieldX Team**
+
 ## 🛠️ Tech Stack
 - **Flutter**: Cross-platform mobile front-end.
 - **Google Gemini**: AI classification and context-aware guidance.
@@ -52,6 +78,6 @@ See [docs/SETUP_KEYS.md](docs/SETUP_KEYS.md) for full configuration details.
 - [**Architecture & Process**](docs/PROCESS_FLOW_ARCHITECTURE.md): End-to-end system sequence diagrams.
 
 ## 📽️ Submission
-- **Demo Video**: [Link coming soon]
-- **Project Deck**: [Link coming soon]
-- **APK Download**: [Link coming soon]
+- **Demo Video**: [View Video Submission](https://drive.google.com/file/d/1L-Teto2HTqUZojNKSAckQrql-mkP34c_/view?usp=sharing)
+- **Project Deck**: [View Presentation](https://docs.google.com/presentation/d/1dF7Z5kIO16d57KnYnjUvzvR3bAGUVEt_NDZhdrI4xbY/edit?usp=sharing)
+- **APK Download**: [View Instruction to download](https://drive.google.com/file/d/1PG_ftrg_xwTtuchIMSzOpu6y92HnGbV_/view?usp=drive_link)

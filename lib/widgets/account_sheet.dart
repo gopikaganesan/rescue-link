@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../core/providers/app_settings_provider.dart';
 import '../core/providers/auth_provider.dart';
+import '../core/providers/responder_provider.dart';
+import '../screens/responder_profile_screen.dart';
 
 Future<void> showAccountSheet(
   BuildContext context, {
@@ -20,14 +22,63 @@ Future<void> showAccountSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    isDismissible: true,
+    enableDrag: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (sheetContext) {
       if (user == null) {
-        return const Padding(
-          padding: EdgeInsets.all(20),
-          child: Center(child: Text('Not signed in')),
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Align(
+                alignment: Alignment.center,
+                child: Container(
+                  height: 4,
+                  width: 40,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              Text(
+                settings.t('status_not_signed_in'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                settings.t('status_please_sign_in'),
+                style: TextStyle(color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 20),
+              if (onLogin != null)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.of(sheetContext).pop();
+                      await onLogin();
+                    },
+                    icon: const Icon(Icons.login),
+                    label: Text(settings.t('account_signin_create')),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                  child: Text(settings.t('button_close')),
+                ),
+              ),
+            ],
+          ),
         );
       }
 
@@ -50,35 +101,57 @@ Future<void> showAccountSheet(
                 ),
               ),
             ),
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  child: Text(
-                    displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
-                    style: const TextStyle(fontSize: 20),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        displayName,
-                        style: Theme.of(context).textTheme.titleLarge,
+            GestureDetector(
+              onTap: () {
+                if (user.isResponder) {
+                  final responder = context.read<ResponderProvider>().responderForUserId(user.id);
+                  if (responder != null) {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ResponderProfileScreen(
+                          responder: responder,
+                          isCurrentUserProfile: true,
+                        ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        user.email.isEmpty
-                            ? (user.phoneNumber ?? settings.t('auth_no_email'))
-                            : user.email,
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    ],
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(settings.t('error_profile_not_found'))),
+                    );
+                  }
+                }
+              },
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    child: Text(
+                      displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
+                      style: const TextStyle(fontSize: 20),
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user.email.isEmpty
+                              ? (user.phoneNumber ?? settings.t('auth_no_email'))
+                              : user.email,
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             Chip(

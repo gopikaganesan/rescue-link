@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -141,6 +142,17 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   bool get _isResponder => widget.currentUserRole == 'responder';
   bool get _canManageResponders => widget.currentUserRole == 'victim';
 
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _cachedStream;
+  String? _cachedSosId;
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> get _messagesStream {
+    if (_cachedStream == null || _cachedSosId != widget.sosId) {
+      _cachedSosId = widget.sosId;
+      _cachedStream = _chatService.watchMessages(widget.sosId);
+    }
+    return _cachedStream!;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -180,14 +192,30 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     });
   }
 
-  Future<void> _loadMasterSosData() async {
-    final requestData = await _chatService.fetchEmergencyRequest(widget.sosId);
-    if (!mounted) {
-      return;
+  @override
+  void didUpdateWidget(GroupChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sosId != widget.sosId) {
+      _cachedStream = null;
+      _cachedSosId = null;
     }
-    setState(() {
-      _sosRequestData = requestData;
-    });
+  }
+
+  Future<void> _loadMasterSosData() async {
+    try {
+      final requestData = await _chatService.fetchEmergencyRequest(widget.sosId);
+      // Create chat lazily if missing
+      await _chatService.ensureChatFromEmergencyRequest(sosId: widget.sosId);
+      
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _sosRequestData = requestData;
+      });
+    } catch (_) {
+      // Silently continue
+    }
   }
 
   void _onComposeTextChange() {
@@ -683,8 +711,24 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _chatService.watchChat(widget.sosId),
       builder: (context, chatSnapshot) {
-        final chatLoaded = chatSnapshot.hasData;
-        final chatData = chatSnapshot.data?.data() ?? <String, dynamic>{};
+        final chatLoaded = chatSnapshot.hasData && chatSnapshot.data != null && chatSnapshot.data!.exists;
+        if (!chatLoaded && _sosRequestData == null) {
+          return Scaffold(
+            appBar: AppBar(
+              backgroundColor: Colors.white,
+              title: Text(
+                context.read<AppSettingsProvider>().t('chat_group_title'),
+                style: const TextStyle(fontSize: 16, color: Colors.red, fontWeight: FontWeight.bold),
+              ),
+            ),
+            body: const Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+        final chatData = chatLoaded 
+            ? chatSnapshot.data!.data() ?? <String, dynamic>{}
+            : (_sosRequestData ?? <String, dynamic>{});
         final overview = _asMap(chatData['sosOverview']);
         final overviewMessage =
             (overview['message'] as String?) ?? 'No SOS message available';
@@ -773,12 +817,16 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
         return Scaffold(
           appBar: AppBar(
+            backgroundColor: Colors.white,
+            iconTheme: IconThemeData(
+    color: Colors.red, 
+  ),
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   context.read<AppSettingsProvider>().t('chat_group_title'),
-                  style: const TextStyle(fontSize: 16),
+                  style: const TextStyle(fontSize: 16,color:Colors.red,fontWeight: FontWeight.bold),
                 ),
                 Row(
                   children: [
@@ -853,7 +901,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
               if (!showJoinGate || !_viewOverviewOnly)
                 Expanded(
                   child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: _chatService.watchMessages(widget.sosId),
+                    stream: _messagesStream,
                     builder: (context, snapshot) {
                       if (snapshot.hasError) {
                         return Center(
@@ -861,7 +909,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                         );
                       }
 
-                      if (snapshot.connectionState == ConnectionState.waiting) {
+                      if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }
 
@@ -934,6 +982,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
                           if (isSystem) {
                             return Container(
+                              key: ValueKey(docId),
                               margin: const EdgeInsets.symmetric(vertical: 8),
                               alignment: Alignment.center,
                               child: Container(
@@ -962,6 +1011,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                           }
 
                           return Semantics(
+                            key: ValueKey(docId),
                             container: true,
                             label: _buildMessageSemanticLabel(
                               senderName: senderName,
@@ -1174,11 +1224,11 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                                             duration: const Duration(milliseconds: 220),
                                             curve: Curves.easeOutCubic,
                                             alignment: Alignment.topLeft,
-                                            child: isAiMessage
-                                                ? _buildAiMessageContent(
-                                                    context, text)
-                                                : _buildLinkableText(
-                                                    context, text),
+                                            child: _buildMessageTextContent(
+                                              context,
+                                              text,
+                                              isAi: isAiMessage,
+                                            ),
                                           ),
                                           if (hasImageAttachment) ...<Widget>[
                                             const SizedBox(height: 8),
@@ -1452,104 +1502,134 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                             ),
                           ),
                         // Chat Input Box
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: <Widget>[
-                            Expanded(
-                              child: TextField(
-                                controller: _controller,
-                                enabled: canSendInChat,
-                                maxLength: _maxMessageLength,
-                                textInputAction: TextInputAction.send,
-                                minLines: 1,
-                                maxLines: 4,
-                                onSubmitted: (_) {
-                                  if (canSendInChat) _send();
-                                },
-                                decoration: InputDecoration(
-                                  hintText: context.read<AppSettingsProvider>().t('chat_type_message'),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 12),
-                                  prefixIcon: IconButton(
-                                    icon: Icon(_isTranscribing
-                                        ? Icons.stop
-                                        : Icons.transcribe),
-                                    onPressed: canSendInChat
-                                        ? _toggleVoiceTranscription
-                                        : null,
-                                    tooltip: _isTranscribing
-                                      ? context.read<AppSettingsProvider>().t('tooltip_stop_voice_to_text')
-                                      : context.read<AppSettingsProvider>().t('tooltip_voice_to_text'),
-                                  ),
-                                  suffixIcon: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      // Mic: record audio clip
-                                      IconButton(
-                                        icon: Icon(_isRecordingClip
-                                            ? Icons.stop_circle
-                                            : Icons.mic),
-                                        color: _isRecordingClip
-                                            ? Colors.red
-                                            : null,
-                                        onPressed: canSendInChat
-                                            ? _toggleVoiceRecording
-                                            : null,
-                                        tooltip: _isRecordingClip
-                                            ? 'Stop recording'
-                                            : 'Record audio clip',
-                                      ),
-                                      // Attach: camera / gallery / location
-                                      IconButton(
-                                        icon: const Icon(Icons.attach_file),
-                                        onPressed: canSendInChat
-                                            ? () => _showAttachOptions(context)
-                                            : null,
-                                        tooltip: 'Attach',
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            // Send button minimized
-                            Container(
-                              margin: const EdgeInsets.only(
-                                  bottom:
-                                      4), // better center alignment with text field
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: canSendInChat
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.grey,
-                              ),
-                              child: IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                    minWidth: 40, minHeight: 40),
-                                icon: _isSending
-                                    ? const SizedBox(
-                                        height: 18,
-                                        width: 18,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white),
-                                      )
-                                    : const Icon(Icons.send,
-                                        size: 20, color: Colors.white),
-                                onPressed:
-                                    !canSendInChat || _isSending || _isAskingAi
-                                        ? null
-                                        : _send,
-                                tooltip: 'Send',
-                              ),
-                            ),
-                          ],
-                        ),
+                        Container(
+  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+  decoration: BoxDecoration(
+    color: Colors.white,
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.05),
+        blurRadius: 8,
+      )
+    ],
+  ),
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      // TEXT FIELD AREA
+      Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(25),
+          ),
+          child: Row(
+            children: [
+              // Voice-to-text
+              IconButton(
+                icon: Icon(
+                  _isTranscribing ? Icons.stop : Icons.mic_none,
+                  color: Colors.red,
+                ),
+                onPressed:
+                    canSendInChat ? _toggleVoiceTranscription : null,
+              ),
+
+              // Text input
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  enabled: canSendInChat,
+                  maxLength: _maxMessageLength,
+                  textInputAction: TextInputAction.send,
+                  minLines: 1,
+                  maxLines: 4,
+                  onSubmitted: (_) {
+                    if (canSendInChat) _send();
+                  },
+                  decoration: InputDecoration(
+                    hintText: context
+                        .read<AppSettingsProvider>()
+                        .t('chat_type_message'),
+                    border: InputBorder.none,
+                    counterText: "", // removes length counter UI
+                  ),
+                ),
+              ),
+
+              // Attach
+              IconButton(
+                icon: const Icon(Icons.attach_file),
+                color: Colors.red,
+                onPressed: canSendInChat
+                    ? () => _showAttachOptions(context)
+                    : null,
+              ),
+
+              // Record clip
+              IconButton(
+                icon: Icon(
+                  _isRecordingClip ? Icons.stop_circle : Icons.mic,
+                  color: _isRecordingClip ? Colors.red : Colors.grey,
+                ),
+                onPressed: canSendInChat
+                    ? _toggleVoiceRecording
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+
+      const SizedBox(width: 8),
+
+      // SEND BUTTON
+      GestureDetector(
+        onTap: (!canSendInChat || _isSending || _isAskingAi)
+            ? null
+            : _send,
+        child: Container(
+          height: 48,
+          width: 48,
+          decoration: BoxDecoration(
+            color: canSendInChat ? Colors.red : Colors.grey,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.red.withOpacity(0.3),
+                blurRadius: 6,
+              )
+            ],
+          ),
+          child: Align(
+  alignment: Alignment.center,
+  child: Container(
+    height: 48,
+    width: 48,
+    decoration: BoxDecoration(
+      color: canSendInChat ? Colors.red : Colors.grey,
+      shape: BoxShape.circle,
+    ),
+    child: Center(
+      child: _isSending
+          ? const SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.send, color: Colors.white),
+    ),
+  ),
+)
+        ),
+      ),
+    ],
+  ),
+),
                         if (!canSendInChat && status != 'cancelled')
                           Padding(
                             padding: const EdgeInsets.only(
@@ -1753,59 +1833,77 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                 }).toList(),
               ),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                ElevatedButton(
-                  onPressed: _isJoining ||
-                          isCancelled ||
-                          requestStatus == 'pending' ||
-                          requestStatus == 'rejected'
-                      ? null
-                      : () {
-                          if (isBlocked) {
-                            _requestApproval();
-                          } else {
-                            _joinConversation();
-                          }
-                        },
-                  child: _isJoining
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(
-                          requestStatus == 'pending'
-                              ? settings.t('chat_join_request_pending')
-                              : requestStatus == 'rejected'
-                                  ? settings.t('chat_join_permanently_blocked')
-                                  : isBlocked
-                                      ? settings.t('chat_join_request_to_join')
-                                      : settings.t('chat_join_conversation'),
-                        ),
-                ),
-                Tooltip(
-                  message: settings.t('chat_toggle_overview_tooltip'),
-                  child: OutlinedButton(
-                    onPressed: isCancelled
-                        ? null
-                        : () {
-                            setState(() {
-                              _viewOverviewOnly = !_viewOverviewOnly;
-                            });
-                          },
-                    child: Text(
-                      _viewOverviewOnly
-                          ? settings.t('chat_view_chat_preview')
-                          : settings.t('chat_view_overview_only'),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+             Row(
+               children: <Widget>[
+                 Expanded(
+                   child: ElevatedButton(
+                     onPressed: _isJoining ||
+                             isCancelled ||
+                             requestStatus == 'pending' ||
+                             requestStatus == 'rejected'
+                         ? null
+                         : () {
+                             if (isBlocked) {
+                               _requestApproval();
+                             } else {
+                               _joinConversation();
+                             }
+                           },
+                     style: ElevatedButton.styleFrom(
+                       padding: const EdgeInsets.symmetric(vertical: 14),
+                       shape: RoundedRectangleBorder(
+                         borderRadius: BorderRadius.circular(12),
+                       ),
+                     ),
+                     child: _isJoining
+                         ? const SizedBox(
+                             width: 16,
+                             height: 16,
+                             child: CircularProgressIndicator(strokeWidth: 2),
+                           )
+                         : Text(
+                             requestStatus == 'pending'
+                                 ? settings.t('chat_join_request_pending')
+                                 : requestStatus == 'rejected'
+                                     ? settings.t('chat_join_permanently_blocked')
+                                     : isBlocked
+                                         ? settings.t('chat_join_request_to_join')
+                                         : settings.t('chat_join_conversation'),
+                             textAlign: TextAlign.center,
+                             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                           ),
+                   ),
+                 ),
+                 const SizedBox(width: 12),
+                 Expanded(
+                   child: Tooltip(
+                     message: settings.t('chat_toggle_overview_tooltip'),
+                     child: OutlinedButton(
+                       onPressed: isCancelled
+                           ? null
+                           : () {
+                               setState(() {
+                                 _viewOverviewOnly = !_viewOverviewOnly;
+                               });
+                             },
+                       style: OutlinedButton.styleFrom(
+                         padding: const EdgeInsets.symmetric(vertical: 14),
+                         shape: RoundedRectangleBorder(
+                           borderRadius: BorderRadius.circular(12),
+                         ),
+                       ),
+                       child: Text(
+                         _viewOverviewOnly
+                             ? settings.t('chat_view_chat_preview')
+                             : settings.t('chat_view_overview_only'),
+                         textAlign: TextAlign.center,
+                         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                       ),
+                     ),
+                   ),
+                 ),
+               ],
+             ),
           ],
         ),
       ),
@@ -2032,7 +2130,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           itemBuilder: (context) => <PopupMenuEntry<String>>[
             PopupMenuItem<String>(
               value: 'view_responders',
-              child: Text(context.read<AppSettingsProvider>().t('chat_view_responders')),
+              child: Text(context.read<AppSettingsProvider>().t('chat_view_responders'),style:TextStyle(color: Colors.red)),
             ),
             if (canShowNotificationToggle)
               PopupMenuItem<String>(
@@ -2040,18 +2138,18 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                 child: Text(
                   chatNotificationsEnabled
                       ? context.read<AppSettingsProvider>().t('menu_disable_notifications')
-                      : context.read<AppSettingsProvider>().t('menu_enable_notifications'),
+                      : context.read<AppSettingsProvider>().t('menu_enable_notifications'),style:TextStyle(color: Colors.red)
                 ),
               ),
             if (canDeleteForVictim)
               PopupMenuItem<String>(
                 value: 'delete_chat',
-                child: Text(context.read<AppSettingsProvider>().t('chat_delete_chat_victim')),
+                child: Text(context.read<AppSettingsProvider>().t('chat_delete_chat_victim'),style:TextStyle(color: Colors.red)),
               ),
             if (canLeaveForResponder)
               PopupMenuItem<String>(
                 value: 'leave_chat',
-                child: Text(context.read<AppSettingsProvider>().t('chat_leave_chat_responder')),
+                child: Text(context.read<AppSettingsProvider>().t('chat_leave_chat_responder'),style:TextStyle(color: Colors.red)),
               ),
           ],
         );
@@ -2078,98 +2176,151 @@ class _GroupChatScreenState extends State<GroupChatScreen>
             children: [
               Text(
                 context.read<AppSettingsProvider>().t('chat_active_responders').replaceAll('{count}', '${responders.length}'),
-                style: Theme.of(ctx)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.bold),
+                style: TextStyle(color:Colors.red,fontWeight:FontWeight.bold),
               ),
               const SizedBox(height: 10),
               if (responders.isEmpty)
                 Text(context.read<AppSettingsProvider>().t('chat_no_participants_yet'))
               else
                 Expanded(
-                  child: ListView.builder(
-                    itemCount: responders.length,
-                    itemBuilder: (context, index) {
-                      final p = responders[index];
-                      final responderUid = (p['uid'] as String?) ?? '';
-                      final isAi = (p['isAi'] as bool?) ?? false;
-                      final name = _uiDisplayName(p['displayName'] as String?,
-                          fallback: context.read<AppSettingsProvider>().t('name_responder'));
-                      return ListTile(
-                        leading: GestureDetector(
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            if (isAi) {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => ResponderProfileScreen(
-                                    responder: ResponderModel.ai(),
-                                    currentUserId: widget.currentUserId,
-                                    currentUserName: widget.currentUserName,
-                                    isCurrentUserProfile: false,
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-                            _showResponderProfile(responderUid);
-                          },
-                          child: CircleAvatar(
-                            backgroundColor:
-                                Theme.of(context).colorScheme.primaryContainer,
-                            child: const Icon(Icons.person),
-                          ),
-                        ),
-                        title: Text(name,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: Text(context.read<AppSettingsProvider>().t('chat_tap_avatar_profile')),
-                        trailing: PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_horiz),
-                          onSelected: (value) {
-                            Navigator.pop(ctx);
-                            if (value == 'review') {
-                              if (isAi) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content:
-                                        Text('AI Assistant cannot be reviewed.'),
-                                  ),
-                                );
-                                return;
-                              }
-                              _showReviewAndRatingDialog(
-                                responderUid: responderUid,
-                                responderName: name,
-                              );
-                              return;
-                            }
-                            if (value == 'remove') {
-                              _confirmRemoveResponder(
-                                messenger: ScaffoldMessenger.of(context),
-                                responderUid: responderUid,
-                                responderName: name,
-                              );
-                            }
-                          },
-                          itemBuilder: (menuContext) => <PopupMenuEntry<String>>[
-                            const PopupMenuItem<String>(
-                              value: 'review',
-                              child: Text('Review & Rating'),
-                            ),
-                            if (_canManageResponders && !isAi &&
-                                responderUid != widget.currentUserId)
-                              const PopupMenuItem<String>(
-                                value: 'remove',
-                                child: Text('Remove Responder'),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
+  child: ListView.builder(
+    padding: const EdgeInsets.all(12),
+    itemCount: responders.length,
+    itemBuilder: (context, index) {
+      final p = responders[index];
+      final responderUid = (p['uid'] as String?) ?? '';
+      final isAi = (p['isAi'] as bool?) ?? false;
+
+      final name = _uiDisplayName(
+        p['displayName'] as String?,
+        fallback: context.read<AppSettingsProvider>().t('name_responder'),
+      );
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 8,
+              color: Colors.black.withOpacity(0.05),
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+
+          // 👤 Avatar
+          leading: GestureDetector(
+            onTap: () {
+              Navigator.pop(ctx);
+
+              if (isAi) {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ResponderProfileScreen(
+                      responder: ResponderModel.ai(),
+                      currentUserId: widget.currentUserId,
+                      currentUserName: widget.currentUserName,
+                      isCurrentUserProfile: false,
+                    ),
                   ),
+                );
+                return;
+              }
+
+              _showResponderProfile(responderUid);
+            },
+            child: CircleAvatar(
+              radius: 26,
+              backgroundColor:
+                  Theme.of(context).colorScheme.primaryContainer,
+              child: Icon(
+                isAi ? Icons.smart_toy : Icons.person,
+                color: Colors.red,
+              ),
+            ),
+          ),
+
+          // 📝 Name
+          title: Text(
+            name,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 16,
+            ),
+          ),
+
+          // 💬 Subtitle
+          subtitle: Text(
+            context
+                .read<AppSettingsProvider>()
+                .t('chat_tap_avatar_profile'),
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 13,
+            ),
+          ),
+
+          // ⚡ Trailing Actions
+          trailing: PopupMenuButton<String>(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            icon: Icon(
+              Icons.more_vert,
+              color: Colors.grey.shade700,
+            ),
+            onSelected: (value) {
+              Navigator.pop(ctx);
+
+              if (value == 'review') {
+                if (isAi) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                          'AI Assistant cannot be reviewed.'),
+                    ),
+                  );
+                  return;
+                }
+
+                _showReviewAndRatingDialog(
+                  responderUid: responderUid,
+                  responderName: name,
+                );
+              }
+
+              if (value == 'remove') {
+                _confirmRemoveResponder(
+                  messenger: ScaffoldMessenger.of(context),
+                  responderUid: responderUid,
+                  responderName: name,
+                );
+              }
+            },
+            itemBuilder: (menuContext) => [
+              const PopupMenuItem(
+                value: 'review',
+                child: Text('Review & Rating'),
+              ),
+              if (_canManageResponders &&
+                  !isAi &&
+                  responderUid != widget.currentUserId)
+                const PopupMenuItem(
+                  value: 'remove',
+                  child: Text('Remove Responder'),
                 ),
+            ],
+          ),
+        ),
+      );
+    },
+  ),
+),
             ],
           ),
         );
@@ -3103,10 +3254,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     required String responderUid,
     required String responderName,
   }) async {
-    if (responderUid.trim().isEmpty) {
-      return;
-    }
-
+    final messenger = ScaffoldMessenger.of(context);
+    final settings = context.read<AppSettingsProvider>();
     final reviewDocId = '${widget.currentUserId}_$responderUid';
     final directReviewRef = FirebaseFirestore.instance
         .collection('responder_reviews')
@@ -3121,19 +3270,14 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           .where('responderUid', isEqualTo: responderUid)
           .get();
       if (fallback.docs.isNotEmpty) {
-        final selectedDoc =
-            pickLatestByUpdatedAt<QueryDocumentSnapshot<Map<String, dynamic>>>(
-                  fallback.docs,
-                  (doc) => doc.data()['updatedAt'],
-                ) ??
-                fallback.docs.first;
+        // Just take the first one or latest if we had a util for it
+        final selectedDoc = fallback.docs.first;
         reviewSnapshot = selectedDoc;
         reviewRef = selectedDoc.reference;
       }
     }
 
     final reviewData = reviewSnapshot.data() ?? <String, dynamic>{};
-
     double selectedRating = (reviewData['rating'] as num?)?.toDouble() ?? 0;
     var reviewText = (reviewData['review'] as String?) ?? '';
     final hasExistingReview = reviewSnapshot.exists;
@@ -3143,148 +3287,247 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       return;
     }
 
-    final messenger = ScaffoldMessenger.of(context);
-
     await showDialog<void>(
       context: context,
+      barrierColor: Colors.black54,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: Text('Review $responderName'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Give both a rating and a review.'),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(5, (i) {
-                    return IconButton(
-                      icon: Icon(
-                        i < selectedRating ? Icons.star : Icons.star_border,
-                        color: Colors.amber,
-                        size: 36,
-                      ),
-                      onPressed: () =>
-                          setDialogState(() => selectedRating = i + 1.0),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  initialValue: reviewText,
-                  onChanged: (value) {
-                    reviewText = value;
-                    setDialogState(() {});
-                  },
-                  maxLines: 4,
-                  maxLength: 400,
-                  enabled: !isSubmitting,
-                  decoration: InputDecoration(
-                    hintText: context.read<AppSettingsProvider>().t('chat_describe_experience'),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
+        builder: (ctx, setDialogState) {
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
             ),
-          ),
-          actions: [
-            if (hasExistingReview)
-              TextButton(
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
-                onPressed: isSubmitting
-                    ? null
-                    : () async {
-                        if (!ctx.mounted) {
-                          return;
-                        }
-                        setDialogState(() {
-                          isSubmitting = true;
-                        });
-                  try {
-                    await reviewRef.delete();
-                  } catch (e) {
-                    if (ctx.mounted) {
-                      setDialogState(() {
-                        isSubmitting = false;
-                      });
-                    }
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Unable to delete review: $e')),
-                      );
-                    }
-                    return;
-                  }
-                  if (!ctx.mounted) {
-                    return;
-                  }
-                  Navigator.pop(ctx);
-                  if (!mounted) {
-                    return;
-                  }
-                  messenger.showSnackBar(
-                    const SnackBar(content: Text('Review deleted.')),
-                  );
-                    },
-                child: const Text('Delete'),
+            insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                color: Theme.of(context).colorScheme.surface,
               ),
-            TextButton(
-              onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: isSubmitting ||
-                      (selectedRating <= 0 && reviewText.trim().isEmpty)
-                  ? null
-                  : () async {
-                      if (!ctx.mounted) {
-                        return;
-                      }
-                      setDialogState(() {
-                        isSubmitting = true;
-                      });
-                    final updatePayload = <String, dynamic>{
-                      'reviewerUid': widget.currentUserId,
-                      'reviewerName': widget.currentUserName,
-                      'responderUid': responderUid,
-                      'responderName': responderName,
-                      'review': reviewText.trim(),
-                      'updatedAt': FieldValue.serverTimestamp(),
-                    };
-                    if (selectedRating > 0) {
-                      updatePayload['rating'] = selectedRating;
-                    }
-                    try {
-                      await reviewRef.set(updatePayload, SetOptions(merge: true));
-                    } catch (e) {
-                      if (ctx.mounted) {
-                        setDialogState(() {
-                          isSubmitting = false;
-                        });
-                      }
-                      if (mounted) {
-                        messenger.showSnackBar(
-                          SnackBar(content: Text('Unable to save review: $e')),
-                        );
-                      }
-                      return;
-                    }
-                    if (!ctx.mounted) {
-                      return;
-                    }
-                    Navigator.pop(ctx);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Review saved for $responderName')),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  /// 🧑 Title
+                  Text(
+                    settings.t('profile_review_title').replaceAll(
+                      '{name}',
+                      settings.localizedDisplayName(responderName),
+                    ),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  /// Subtitle
+                  Text(
+                    settings.t('profile_give_rating_review'),
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 13,
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  /// ⭐ Rating (modern style)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: List.generate(5, (i) {
+                      final isSelected = i < selectedRating;
+
+                      return GestureDetector(
+                        onTap: isSubmitting
+                            ? null
+                            : () {
+                                setDialogState(() {
+                                  selectedRating = i + 1.0;
+                                });
+                              },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.amber.withOpacity(0.15)
+                                : Colors.transparent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.star,
+                            size: 32,
+                            color: isSelected
+                                ? Colors.amber
+                                : Colors.grey.shade400,
+                          ),
+                        ),
                       );
-                    }
-                    },
-                child: const Text('Save Review'),
+                    }),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  /// ✍️ Review input
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: TextFormField(
+                      initialValue: reviewText,
+                      onChanged: (value) {
+                        reviewText = value;
+                        setDialogState(() {});
+                      },
+                      maxLines: 4,
+                      maxLength: 400,
+                      enabled: !isSubmitting,
+                      style: const TextStyle(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: settings.t('profile_share_experience'),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.all(12),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  /// 🔘 Actions (modern buttons)
+                  Row(
+                    children: [
+                      /// Delete (if exists)
+                      if (hasExistingReview)
+                        Expanded(
+                          child: TextButton(
+                            onPressed: isSubmitting
+                                ? null
+                                : () async {
+                                    setDialogState(() => isSubmitting = true);
+                                    try {
+                                      await reviewRef.delete();
+                                    } catch (e) {
+                                      setDialogState(() => isSubmitting = false);
+                                      messenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            '${settings.t('profile_unable_delete_review')}$e',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+                                    Navigator.pop(ctx);
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          settings.t('profile_review_deleted'),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.red,
+                            ),
+                            child: Text(settings.t('menu_delete_chat')),
+                          ),
+                        ),
+
+                      if (hasExistingReview) const SizedBox(width: 8),
+
+                      /// Cancel
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed:
+                              isSubmitting ? null : () => Navigator.pop(ctx),
+                          style: OutlinedButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(settings.t('profile_cancel')),
+                        ),
+                      ),
+
+                      const SizedBox(width: 8),
+
+                      /// Save
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: isSubmitting ||
+                                  (selectedRating <= 0 &&
+                                      reviewText.trim().isEmpty)
+                              ? null
+                              : () async {
+                                  setDialogState(() => isSubmitting = true);
+
+                                  final updatePayload = {
+                                    'reviewerUid': widget.currentUserId,
+                                    'reviewerName': widget.currentUserName,
+                                    'responderUid': responderUid,
+                                    'responderName': responderName,
+                                    'review': reviewText.trim(),
+                                    'updatedAt':
+                                        FieldValue.serverTimestamp(),
+                                  };
+
+                                  if (selectedRating > 0) {
+                                    updatePayload['rating'] =
+                                        selectedRating;
+                                  }
+
+                                  try {
+                                    await reviewRef.set(
+                                      updatePayload,
+                                      SetOptions(merge: true),
+                                    );
+                                  } catch (e) {
+                                    setDialogState(
+                                        () => isSubmitting = false);
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          '${settings.t('profile_unable_save_review')}$e',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  Navigator.pop(ctx);
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        settings.t('profile_review_saved'),
+                                      ),
+                                    ),
+                                  );
+                                },
+                          style: ElevatedButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: isSubmitting
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(settings.t('profile_save_review')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -3302,7 +3545,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       alignment: Alignment.topCenter,
       child: Card(
         elevation: 2,
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        margin: const EdgeInsets.all(10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -3549,7 +3792,6 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         color: Colors.black12,
         borderRadius: BorderRadius.circular(8),
       ),
-      alignment: Alignment.center,
       child: Text(
         type.contains('/') ? type.split('/').last : type,
         textAlign: TextAlign.center,
@@ -3558,7 +3800,11 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     );
   }
 
-  Widget _buildAiMessageContent(BuildContext context, String text) {
+  Widget _buildMessageTextContent(
+    BuildContext context,
+    String text, {
+    bool isAi = false,
+  }) {
     // Extract source and status markers
     String cleanText = text;
     String? sourceMarker;
@@ -3597,9 +3843,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
 
     // Extract all YouTube video IDs in order and deduplicate.
     final youtubeIds = extractYoutubeVideoIds(cleanText);
-    final visibleText = youtubeIds.isNotEmpty
-      ? _removeYoutubeUrlsForDisplay(cleanText)
-      : cleanText;
+    final visibleText = cleanText;
 
     // Extract phone numbers
     final phoneNumbers = _extractPhoneNumbers(visibleText);
@@ -3608,9 +3852,16 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     final lines = visibleText.split('\n');
     final widgets = <Widget>[];
 
+    final baseStyle = DefaultTextStyle.of(context).style.copyWith(
+          height: 1.35,
+          color: isAi ? Colors.red.shade900 : null,
+        );
+
     for (final line in lines) {
       final trimmed = line.trim();
-      if (trimmed.isEmpty) continue;
+      if (trimmed.isEmpty) {
+        continue;
+      }
 
       if (RegExp(r'^#{1,6}\s+').hasMatch(trimmed)) {
         final headingText = trimmed.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
@@ -3619,7 +3870,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           child: Text(
             headingText,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.red.shade900,
+                  color: isAi ? Colors.red.shade900 : null,
                   fontWeight: FontWeight.bold,
                 ),
           ),
@@ -3632,14 +3883,11 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Text('• ',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text('• ',
+                  style: baseStyle.copyWith(fontWeight: FontWeight.w600)),
               Expanded(
                 child: DefaultTextStyle(
-                  style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                        height: 1.35,
-                        color: Colors.red.shade900,
-                      ),
+                  style: baseStyle,
                   child: _buildBoldAwareText(context, bulletText),
                 ),
               ),
@@ -3648,7 +3896,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         ));
       } else if (RegExp(r'^\d+\.\s*').hasMatch(trimmed)) {
         // Numbered list
-        final match = RegExp(r'^(\d+)\.\s*(.*) $').firstMatch('$trimmed\u0000');
+        final match = RegExp(r'^(\d+)\.\s*(.*)$').firstMatch(trimmed);
         if (match != null) {
           widgets.add(Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
@@ -3656,13 +3904,10 @@ class _GroupChatScreenState extends State<GroupChatScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text('${match.group(1)}. ',
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                    style: baseStyle.copyWith(fontWeight: FontWeight.w600)),
                 Expanded(
                   child: DefaultTextStyle(
-                    style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                          height: 1.35,
-                          color: Colors.red.shade900,
-                        ),
+                    style: baseStyle,
                     child: _buildBoldAwareText(context, match.group(2)!),
                   ),
                 ),
@@ -3675,10 +3920,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
         widgets.add(Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: DefaultTextStyle(
-            style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                  height: 1.35,
-                  color: Colors.red.shade900,
-                ),
+            style: baseStyle,
             child: _buildBoldAwareText(context, trimmed),
           ),
         ));
@@ -3721,21 +3963,27 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       ));
     }
 
-    // Add one embedded-style preview card per discovered YouTube video.
+    // Add one embedded-style preview card per discovered YouTube video IF it is trusted.
     if (youtubeIds.isNotEmpty) {
-      widgets.add(const SizedBox(height: 12));
-      for (var index = 0; index < youtubeIds.length; index++) {
-        widgets.add(
-          Padding(
-            padding: EdgeInsets.only(bottom: index == youtubeIds.length - 1 ? 0 : 8),
-            child: _buildYoutubePreviewCard(
-              context,
-              youtubeIds[index],
-              index: index,
-              total: youtubeIds.length,
+      final trustedIds = ChatService.getTrustedVideoIds();
+      final displayableIds = youtubeIds.where((id) => trustedIds.contains(id)).toList();
+
+      if (displayableIds.isNotEmpty) {
+        widgets.add(const SizedBox(height: 12));
+        for (var index = 0; index < displayableIds.length; index++) {
+          widgets.add(
+            Padding(
+              padding:
+                  EdgeInsets.only(bottom: index == displayableIds.length - 1 ? 0 : 8),
+              child: _buildYoutubePreviewCard(
+                context,
+                displayableIds[index],
+                index: index,
+                total: displayableIds.length,
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
     }
 
@@ -3752,22 +4000,15 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 
   String _removeYoutubeUrlsForDisplay(String text) {
-    final withoutWatchUrls = text.replaceAll(
-      RegExp(
-        r'https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}',
-        caseSensitive: false,
-      ),
-      '',
-    );
-    final withoutShortUrls = withoutWatchUrls.replaceAll(
-      RegExp(
-        r'https?:\/\/youtu\.be\/[A-Za-z0-9_-]{11}',
-        caseSensitive: false,
-      ),
-      '',
+    // Matches optional bullet point/numbering prefix followed by the URL, taking the whole line if the URL is the main content.
+    final youtubeRegex = RegExp(
+      r'(?:^[\s\-*•]*|[\n][\s\-*•]*)https?:\/\/(?:(?:www\.)?youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}[\s]*',
+      caseSensitive: false,
     );
 
-    return withoutShortUrls
+    final cleaned = text.replaceAll(youtubeRegex, '');
+
+    return cleaned
         .split('\n')
         .map((line) => line.trimRight())
         .where((line) => line.trim().isNotEmpty)
@@ -3829,9 +4070,13 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     return GestureDetector(
       onTap: () async {
         try {
-          await launchUrl(youtubeUrl, mode: LaunchMode.inAppWebView);
+          // Prioritize opening in the native YouTube app or external browser to avoid "Webpage not available" errors.
+          final launched = await launchUrl(youtubeUrl, mode: LaunchMode.externalApplication);
+          if (!launched) {
+            await launchUrl(youtubeUrl, mode: LaunchMode.inAppBrowserView);
+          }
         } catch (_) {
-          await launchUrl(youtubeUrl, mode: LaunchMode.externalApplication);
+          await launchUrl(youtubeUrl, mode: LaunchMode.platformDefault);
         }
       },
       child: Container(
@@ -3888,7 +4133,28 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                       ),
                     ),
                   ),
-                  Icon(Icons.open_in_new, color: Colors.red[400], size: 18),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.red[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'YouTube App',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.red[700],
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.open_in_new, color: Colors.red[700], size: 14),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -3898,104 +4164,92 @@ class _GroupChatScreenState extends State<GroupChatScreen>
     );
   }
 
-  /// Renders plain chat text but makes geo: and https: URLs tappable.
-  Widget _buildLinkableText(BuildContext context, String text) {
-    // Pattern matches geo:lat,lng  or  https://...
-    final urlPattern =
-        RegExp(r'(geo:\-?\d+(\.\d+)?,\-?\d+(\.\d+)?)|(https?://[^\s]+)');
-    final matches = urlPattern.allMatches(text);
 
+
+  Widget _buildBoldAwareText(BuildContext context, String text) {
     final spans = <InlineSpan>[];
-    int last = 0;
-    final style = DefaultTextStyle.of(context).style;
-    final linkStyle = style.copyWith(
+    // Matches **bold**, __bold__, *italic*, _italic_, or https://links, or geo:links
+    final regex = RegExp(
+        r'(\*\*|__)(.+?)\1|(\*|_)(.+?)\3|((?:https?:\/\/)[^\s]+|geo:\s*[0-9\.\-\+]+(?:\s*,\s*[0-9\.\-\+]+)?)',
+        caseSensitive: false);
+    int lastIndex = 0;
+
+    final defaultStyle = DefaultTextStyle.of(context).style.copyWith(height: 1.35);
+    final linkStyle = defaultStyle.copyWith(
       color: Colors.blue[700],
       decoration: TextDecoration.underline,
     );
 
-    for (final m in matches) {
-      if (m.start > last) {
-        spans.add(TextSpan(text: text.substring(last, m.start), style: style));
+    for (final match in regex.allMatches(text)) {
+      // Add plain text before match
+      if (match.start > lastIndex) {
+        spans.add(TextSpan(
+            text: text.substring(lastIndex, match.start), style: defaultStyle));
       }
-      final url = m.group(0)!;
-      spans.add(WidgetSpan(
-        alignment: PlaceholderAlignment.baseline,
-        baseline: TextBaseline.alphabetic,
-        child: GestureDetector(
-          onTap: () async {
+
+      final boldText = match.group(2);
+      final italicText = match.group(4);
+      final urlMatch = match.group(5);
+
+      if (boldText != null) {
+        spans.add(TextSpan(
+          text: boldText,
+          style: defaultStyle.copyWith(fontWeight: FontWeight.bold),
+        ));
+      } else if (italicText != null) {
+        spans.add(TextSpan(
+          text: italicText,
+          style: defaultStyle.copyWith(fontStyle: FontStyle.italic),
+        ));
+      } else if (urlMatch != null) {
+        final isGeo = urlMatch.startsWith(RegExp(r'geo:\s*', caseSensitive: false));
+        final isGoogleMaps = urlMatch.contains('google.com/maps') || urlMatch.contains('maps.app.goo.gl');
+        
+        if (isGeo || isGoogleMaps) {
+          spans.add(WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: GestureDetector(
+              onTap: () async {
+                final uri = Uri.parse(urlMatch.replaceAll(RegExp(r'\s+'), ''));
+                try {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                } catch (_) {
+                  await launchUrl(uri, mode: LaunchMode.inAppWebView);
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(right: 4.0),
+                child: Icon(isGeo ? Icons.navigation : Icons.map, size: 16, color: Colors.blue[700]),
+              ),
+            ),
+          ));
+        }
+
+        spans.add(TextSpan(
+          text: isGeo ? 'Navigate' : (isGoogleMaps ? 'Open in Google Maps' : urlMatch),
+          style: linkStyle,
+          recognizer: TapGestureRecognizer()..onTap = () async {
+            final uri = Uri.parse(urlMatch.replaceAll(RegExp(r'\s+'), ''));
             try {
-              await launchUrl(Uri.parse(url),
-                  mode: LaunchMode.externalApplication);
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
             } catch (_) {
-              await launchUrl(Uri.parse(url), mode: LaunchMode.inAppWebView);
+              await launchUrl(uri, mode: LaunchMode.inAppWebView);
             }
           },
-          child: Text(
-            url.startsWith('geo:') ? '📍 Open in Maps' : url,
-            style: linkStyle,
-          ),
-        ),
-      ));
-      last = m.end;
-    }
-    if (last < text.length) {
-      spans.add(TextSpan(text: text.substring(last), style: style));
-    }
-
-    final Widget messageText = matches.isEmpty
-        ? Text(text)
-        : RichText(
-            textScaler: MediaQuery.textScalerOf(context),
-            text: TextSpan(children: spans),
-          );
-
-    final phoneNumbers = _extractPhoneNumbers(text);
-    if (phoneNumbers.isEmpty) {
-      return messageText;
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        messageText,
-        const SizedBox(height: 8),
-        _buildCallButtons(context, phoneNumbers),
-      ],
-    );
-  }
-
-  Widget _buildBoldAwareText(BuildContext context, String text) {
-    final parts = <TextSpan>[];
-    final regex = RegExp(r'(\*\*|__)(.+?)\1|(\*|_)(.+?)\3');
-    int lastIndex = 0;
-
-    for (final match in regex.allMatches(text)) {
-      if (match.start > lastIndex) {
-        parts.add(TextSpan(text: text.substring(lastIndex, match.start)));
+        ));
       }
 
-      final matchedText = match.group(2) ?? match.group(4) ?? '';
-      final isStrong = match.group(1) != null;
-
-      parts.add(TextSpan(
-        text: matchedText,
-        style: isStrong
-            ? const TextStyle(fontWeight: FontWeight.bold)
-            : const TextStyle(fontStyle: FontStyle.italic),
-      ));
       lastIndex = match.end;
     }
 
     if (lastIndex < text.length) {
-      parts.add(TextSpan(text: text.substring(lastIndex)));
+      spans.add(TextSpan(
+          text: text.substring(lastIndex), style: defaultStyle));
     }
 
     return RichText(
       textScaler: MediaQuery.textScalerOf(context),
-      text: TextSpan(
-        style: DefaultTextStyle.of(context).style.copyWith(height: 1.35),
-        children: parts,
-      ),
+      text: TextSpan(children: spans),
     );
   }
 

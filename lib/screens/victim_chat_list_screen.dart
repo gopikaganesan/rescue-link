@@ -84,6 +84,12 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Signed out successfully.')),
         );
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const AuthScreen(showGuestButton: false),
+          ),
+          (route) => false,
+        );
       },
       onOpenResponderRequests: () {
         Navigator.of(context).pushReplacement(
@@ -92,6 +98,64 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
       },
     );
   }
+
+  Widget _buildSegment({
+  required String label,
+  required bool selected,
+  required VoidCallback onTap,
+}) {
+  return GestureDetector(
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: selected ? Colors.red.shade700 : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: selected ? Colors.white : Colors.grey,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildBadge({
+  IconData? icon,
+  String? value,
+  String? label,
+  required Color color,
+}) {
+  return Container(
+    margin: const EdgeInsets.symmetric(vertical:3),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.15),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 4),
+        ],
+        Text(
+          value ?? label ?? '',
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.w600,
+            fontSize: 11,
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -128,347 +192,365 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
         },
         child: Column(
           children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                ChoiceChip(
-                  label: Text(context.read<AppSettingsProvider>().t('filter_active')),
-                  selected: _filter == _VictimChatFilter.active,
-                  onSelected: (_) {
-                    setState(() {
-                      _filter = _VictimChatFilter.active;
-                    });
-                  },
-                ),
-                ChoiceChip(
-                  label: Text(context.read<AppSettingsProvider>().t('filter_cancelled')),
-                  selected: _filter == _VictimChatFilter.cancelled,
-                  onSelected: (_) {
-                    setState(() {
-                      _filter = _VictimChatFilter.cancelled;
-                    });
-                  },
-                ),
-                ChoiceChip(
-                  label: Text(context.read<AppSettingsProvider>().t('filter_all')),
-                  selected: _filter == _VictimChatFilter.all,
-                  onSelected: (_) {
-                    setState(() {
-                      _filter = _VictimChatFilter.all;
-                    });
-                  },
-                ),
-              ],
-            ),
+            Padding(
+  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+  child: SingleChildScrollView(
+    scrollDirection: Axis.horizontal, // ✅ important
+    child: Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade300,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          _buildSegment(
+            label: context.read<AppSettingsProvider>().t('filter_active'),
+            selected: _filter == _VictimChatFilter.active,
+            onTap: () {
+              setState(() {
+                _filter = _VictimChatFilter.active;
+              });
+            },
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value.trim().toLowerCase();
-                });
-              },
-              decoration: InputDecoration(
-                hintText: context.read<AppSettingsProvider>().t('hint_search_case'),
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchQuery.isEmpty
-                    ? null
-                    : IconButton(
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {
-                            _searchQuery = '';
-                          });
-                        },
-                        icon: const Icon(Icons.clear),
-                      ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(
-                    color: Theme.of(context).colorScheme.primary,
-                    width: 1.4,
-                  ),
-                ),
-                filled: true,
-                fillColor: Theme.of(context).colorScheme.surface,
-                isDense: true,
-              ),
-            ),
+          _buildSegment(
+            label: context.read<AppSettingsProvider>().t('filter_cancelled'),
+            selected: _filter == _VictimChatFilter.cancelled,
+            onTap: () {
+              setState(() {
+                _filter = _VictimChatFilter.cancelled;
+              });
+            },
           ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _chatService.watchVictimChats(widget.currentUserId),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text(context.read<AppSettingsProvider>().t('error_failed_load_chats')));
-                }
-
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final docs = snapshot.data?.docs ??
-                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-
-                if (docs.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text(context.read<AppSettingsProvider>().t('status_no_sos_chats_found')),
-                    ),
-                  );
-                }
-
-                final sortedDocs = docs.toList()
-                  ..sort(
-                    (a, b) =>
-                        _createdAt(b.data()).compareTo(_createdAt(a.data())),
-                  );
-
-                final filteredDocs = sortedDocs.where((doc) {
-                  final data = doc.data();
-                  if (_filter == _VictimChatFilter.all) {
-                    // continue to search matching below
-                  } else {
-                    final status =
-                        ((data['status'] as String?) ?? 'active').toLowerCase();
-                    if (_filter == _VictimChatFilter.active && status == 'cancelled') {
-                      return false;
-                    }
-                    if (_filter == _VictimChatFilter.cancelled &&
-                        status != 'cancelled') {
-                      return false;
-                    }
-                  }
-
-                  if (_searchQuery.isEmpty) {
-                    return true;
-                  }
-
-                  final sosId = ((data['sosId'] as String?) ?? doc.id).toLowerCase();
-                  final overview = _asMap(data['sosOverview']);
-                  final msg =
-                      ((overview['message'] as String?) ?? '').toLowerCase();
-                  final crisisType =
-                      ((overview['crisisType'] as String?) ?? '').toLowerCase();
-                  return sosId.contains(_searchQuery) ||
-                      msg.contains(_searchQuery) ||
-                      crisisType.contains(_searchQuery);
-                }).toList();
-
-                if (filteredDocs.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text(
-                        _filter == _VictimChatFilter.cancelled
-                            ? 'No cancelled chats found.'
-                            : _filter == _VictimChatFilter.active
-                                ? 'No active chats found.'
-                                : 'No chats found.',
-                      ),
-                    ),
-                  );
-                }
-
-                return ListView.separated(
-                  itemCount: filteredDocs.length,
-                  separatorBuilder: (_, __) => Divider(
-                    height: 1,
-                    color: Colors.grey.shade300,
-                  ),
-                  itemBuilder: (context, index) {
-                    final doc = filteredDocs[index];
-                    final data = doc.data();
-
-                    final sosId = (data['sosId'] as String?) ?? doc.id;
-                    final overview = _asMap(data['sosOverview']);
-                    final chatTitle = _humanFriendlyChatTitle(
-                      data: data,
-                      sosId: sosId,
-                      settings: settings,
-                    );
-                    final message = _safeText(
-                      overview['message'] as String?,
-                      fallback: settings.t('status_no_sos_message_available'),
-                      maxLen: 84,
-                    );
-                    final status =
-                        ((data['status'] as String?) ?? 'active').toLowerCase();
-                    final createdAt = _createdAt(data);
-                    final isCancelled = status == 'cancelled';
-                    final isDeleting = _deletingSosIds.contains(sosId);
-                    final participantCount = _participantCount(data);
-                    final onlineCount = _onlineCount(data);
-
-                    return InkWell(
-                      onTap: isCancelled
-                          ? null
-                          : () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => GroupChatScreen(
-                                    sosId: sosId,
-                                    currentUserId: widget.currentUserId,
-                                    currentUserName: widget.currentUserName,
-                                    currentUserRole: 'victim',
-                                    enableResponderJoinGate: false,
-                                  ),
-                                ),
-                              );
-                            },
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Expanded(
-                                        child: Text(
-                                          chatTitle,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: <Widget>[
-                                          Icon(
-                                            Icons.circle,
-                                            size: 10,
-                                            color: Colors.green.shade700,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            '$onlineCount',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .labelSmall
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Colors.green.shade700,
-                                                ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Icon(
-                                            Icons.group,
-                                            size: 10,
-                                            color: Colors.redAccent.shade700,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            '$participantCount',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .labelSmall
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Colors.redAccent.shade700,
-                                                ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    message,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    children: <Widget>[
-                                      Expanded(
-                                        child: Text(
-                                          '${settings.t('label_case_id')}: $sosId',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style:
-                                              Theme.of(context).textTheme.bodySmall,
-                                        ),
-                                      ),
-                                      Text(
-                                        _timeText(createdAt),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall,
-                                      ),
-                                    ],
-                                  ),
-                                  if (isCancelled) ...<Widget>[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      settings.t('status_cancelled'),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.red.shade700,
-                                          ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                            if (isCancelled)
-                              isDeleting
-                                  ? const Padding(
-                                      padding: EdgeInsets.only(left: 8, top: 2),
-                                      child: SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      ),
-                                    )
-                                  : IconButton(
-                                      tooltip: settings.t('tooltip_delete_cancelled_chat'),
-                                      icon: const Icon(Icons.delete_outline),
-                                      onPressed: () =>
-                                          _confirmDeleteCancelledChat(sosId: sosId),
-                                    ),
-                            const SizedBox(width: 4),
-                            Icon(
-                              Icons.chevron_right,
-                              color: Colors.grey.shade600,
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
+          _buildSegment(
+            label: context.read<AppSettingsProvider>().t('filter_all'),
+            selected: _filter == _VictimChatFilter.all,
+            onTap: () {
+              setState(() {
+                _filter = _VictimChatFilter.all;
+              });
+            },
           ),
         ],
       ),
     ),
+  ),
+),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value.trim().toLowerCase();
+                  });
+                },
+                decoration: InputDecoration(
+                  hintText:
+                      context.read<AppSettingsProvider>().t('hint_search_case'),
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {
+                              _searchQuery = '';
+                            });
+                          },
+                          icon: const Icon(Icons.clear),
+                        ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide(color: Colors.red.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide(
+                      color: Colors.red,
+                      width: 1.4,
+                    ),
+                  ),
+                  filled: true,
+                  fillColor: Theme.of(context).colorScheme.surface,
+                  isDense: true,
+                ),
+              ),
+            ),
+            Expanded(
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _chatService.watchVictimChats(widget.currentUserId),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                        child: Text(context
+                            .read<AppSettingsProvider>()
+                            .t('error_failed_load_chats')));
+                  }
+
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final docs = snapshot.data?.docs ??
+                      const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+                  if (docs.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(context
+                            .read<AppSettingsProvider>()
+                            .t('status_no_sos_chats_found')),
+                      ),
+                    );
+                  }
+
+                  final sortedDocs = docs.toList()
+                    ..sort(
+                      (a, b) =>
+                          _createdAt(b.data()).compareTo(_createdAt(a.data())),
+                    );
+
+                  final filteredDocs = sortedDocs.where((doc) {
+                    final data = doc.data();
+                    if (_filter == _VictimChatFilter.all) {
+                      // continue to search matching below
+                    } else {
+                      final status = ((data['status'] as String?) ?? 'active')
+                          .trim()
+                          .toLowerCase();
+                      if (_filter == _VictimChatFilter.active &&
+                          status == 'cancelled') {
+                        return false;
+                      }
+                      if (_filter == _VictimChatFilter.cancelled &&
+                          status != 'cancelled') {
+                        return false;
+                      }
+                    }
+
+                    if (_searchQuery.isEmpty) {
+                      return true;
+                    }
+
+                    final sosId =
+                        ((data['sosId'] as String?) ?? doc.id).toLowerCase();
+                    final overview = _asMap(data['sosOverview']);
+                    final msg =
+                        ((overview['message'] as String?) ?? '').toLowerCase();
+                    final crisisType =
+                        ((overview['crisisType'] as String?) ?? '')
+                            .toLowerCase();
+                    return sosId.contains(_searchQuery) ||
+                        msg.contains(_searchQuery) ||
+                        crisisType.contains(_searchQuery);
+                  }).toList();
+
+                  if (filteredDocs.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          _filter == _VictimChatFilter.cancelled
+                              ? 'No cancelled chats found.'
+                              : _filter == _VictimChatFilter.active
+                                  ? 'No active chats found.'
+                                  : 'No chats found.',
+                        ),
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    itemCount: filteredDocs.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      color: Colors.grey.shade300,
+                    ),
+                    itemBuilder: (context, index) {
+                      final doc = filteredDocs[index];
+                      final data = doc.data();
+
+                      final sosId = (data['sosId'] as String?) ?? doc.id;
+                      final overview = _asMap(data['sosOverview']);
+                      final chatTitle = _humanFriendlyChatTitle(
+                        data: data,
+                        sosId: sosId,
+                        settings: settings,
+                      );
+                      final message = _safeText(
+                        overview['message'] as String?,
+                        fallback: settings.t('status_no_sos_message_available'),
+                        maxLen: 84,
+                      );
+                      final status = ((data['status'] as String?) ?? 'active')
+                          .toLowerCase();
+                      final createdAt = _createdAt(data);
+                      final isCancelled = status == 'cancelled';
+                      final isDeleting = _deletingSosIds.contains(sosId);
+                      final participantCount = _participantCount(data);
+                      final onlineCount = _onlineCount(data);
+
+                      return InkWell(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => GroupChatScreen(
+                                sosId: sosId,
+                                currentUserId: widget.currentUserId,
+                                currentUserName: widget.currentUserName,
+                                currentUserRole: 'victim',
+                                enableResponderJoinGate: false,
+                              ),
+                            ),
+                          );
+                        },
+                        child: Padding(
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+  child: Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: Colors.grey.shade100,
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.2),
+          blurRadius: 8,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        /// MAIN CONTENT
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              /// TOP ROW (Title + time)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      chatTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _timeText(createdAt),
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: Colors.grey),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 6),
+
+              /// BADGES ROW (instead of tiny icons + numbers)
+              Wrap(
+                spacing: 8,
+                children: [
+                  _buildBadge(
+                    icon: Icons.circle,
+                    value: '$onlineCount',
+                    color: Colors.green,
+                  ),
+                  _buildBadge(
+                    icon: Icons.group,
+                    value: '$participantCount',
+                    color: Colors.redAccent,
+                  ),
+                  _buildBadge(
+                    label:
+                        '${settings.t('label_case_id')}: $sosId',
+                    color: Colors.blueGrey,
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              /// MESSAGE PREVIEW
+              Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.red.shade300,
+                ),
+              ),
+
+              /// CANCELLED LABEL
+              if (isCancelled) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    settings.t('status_cancelled'),
+                    style: TextStyle(
+                      color: Colors.red.shade400,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        /// ACTIONS
+        Column(
+          children: [
+            if (isCancelled)
+              isDeleting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _confirmDeleteCancelledChat(
+                        sosId: sosId,
+                      ),
+                    ),
+            Icon(
+              Icons.chevron_right,
+              color: Colors.grey.shade600,
+            ),
+          ],
+        ),
+      ],
+    ),
+  ),
+),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
       bottomNavigationBar: FixedFooterNavigationBar(
         activeIndex: 1,
         showPeople: false,
@@ -487,6 +569,8 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
         onProfileTap: _showAccountSheet,
       ),
     );
+
+    
   }
 
   Future<void> _confirmDeleteCancelledChat({required String sosId}) async {
@@ -604,8 +688,10 @@ class _VictimChatListScreenState extends State<VictimChatListScreen> {
 
   static String _timeText(DateTime value) {
     final local = value.toLocal();
-    final date = '${local.year.toString().padLeft(4, '0')}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
-    final time = '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    final date =
+        '${local.year.toString().padLeft(4, '0')}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+    final time =
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
     return '$date $time';
   }
 

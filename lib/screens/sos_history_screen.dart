@@ -1,11 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
 import '../core/providers/app_settings_provider.dart';
 import '../core/providers/emergency_request_provider.dart';
 import '../services/chat_service.dart';
 import 'group_chat_screen.dart';
+import 'package:geocoding/geocoding.dart';
+
 
 class SosHistoryScreen extends StatelessWidget {
   const SosHistoryScreen({
@@ -16,6 +17,17 @@ class SosHistoryScreen extends StatelessWidget {
 
   final String currentUserId;
   final String currentUserName;
+
+  Future<String> getAddress(double lat, double lng) async {
+  try {
+    final placemarks = await placemarkFromCoordinates(lat, lng);
+    final p = placemarks.first;
+
+    return "${p.street}, ${p.locality}, ${p.administrativeArea}, ${p.country}";
+  } catch (e) {
+    return "Unknown location";
+  }
+}
 
   String _translateSeverityLabel(AppSettingsProvider settings, String severity) {
     final normalized = severity.trim().toLowerCase();
@@ -82,27 +94,10 @@ class SosHistoryScreen extends StatelessWidget {
           }
 
           final docs = snapshot.data?.docs ?? const [];
-          DateTime? parseTimestamp(Object? raw) {
-            if (raw is Timestamp) return raw.toDate();
-            if (raw is DateTime) return raw;
-            return null;
-          }
 
           final filteredDocs = docs.where((doc) {
-            final data = doc.data();
-            final status =
-                ((data['status'] as String?) ?? 'open').toLowerCase();
-            if (status != 'cancelled') {
-              return true;
-            }
-            final createdAt = parseTimestamp(data['createdAt']) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            final cancelledAt = parseTimestamp(data['cancelledAt']);
-            if (cancelledAt == null) {
-              return true;
-            }
-            final difference = cancelledAt.difference(createdAt).inSeconds;
-            return difference > 30;
+            doc.data();
+            return true;
           }).toList();
 
           final sortedDocs = filteredDocs
@@ -171,7 +166,13 @@ class SosHistoryScreen extends StatelessWidget {
                       ? settings.t('status_active')
                       : settings.t('status_unknown');
 
-              return ListTile(
+              return Padding(
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+  child: ListTile(
+                tileColor: Colors.grey[100],
+                shape: RoundedRectangleBorder(
+  borderRadius: BorderRadius.circular(12),
+),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 title: Text(
@@ -188,34 +189,113 @@ class SosHistoryScreen extends StatelessWidget {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        Chip(
-                          label: Text(severityLabel),
-                          backgroundColor: severityColor.withAlpha(38),
-                          labelStyle: TextStyle(
-                            color: severityColor,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Chip(
-                          label: Text(statusLabelText),
-                          backgroundColor: status == 'cancelled'
-                              ? Colors.red.shade50
-                              : Colors.green.shade50,
-                          labelStyle: TextStyle(
-                            color: status == 'cancelled'
-                                ? Colors.red.shade700
-                                : Colors.green.shade700,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                        Container(
+  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+  decoration: BoxDecoration(
+    color: severityColor.withAlpha(38),
+    borderRadius: BorderRadius.circular(20), // fully rounded
+  ),
+  child: Text(
+    severityLabel,
+    style: TextStyle(
+      color: severityColor,
+      fontWeight: FontWeight.w600,
+      fontSize: 12,
+    ),
+  ),
+),
+                        Container(
+  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+  decoration: BoxDecoration(
+    color: status == 'cancelled'
+        ? Colors.red.shade50
+        : Colors.green.shade50,
+    borderRadius: BorderRadius.circular(20),
+  ),
+  child: Text(
+    statusLabelText,
+    style: TextStyle(
+      color: status == 'cancelled'
+          ? Colors.red.shade700
+          : Colors.green.shade700,
+      fontWeight: FontWeight.w600,
+      fontSize: 12,
+    ),
+  ),
+),
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text('${settings.t('label_case_id')}: $sosId'),
-                    const SizedBox(height: 4),
-                    Text('${settings.t('category_label')}: $categoryLabel'),
-                    Text('${settings.t('severity_label')}: $severityLabel'),
-                    Text(formattedTime),
+                   const SizedBox(height: 6),
+
+// Case ID
+RichText(
+  text: TextSpan(
+    children: [
+      TextSpan(
+        text: '${settings.t('label_case_id')}: ',
+        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+      ),
+      TextSpan(
+        text: sosId,
+        style: const TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+          color: Colors.black,
+        ),
+      ),
+    ],
+  ),
+),
+
+// Category
+RichText(
+  text: TextSpan(
+    children: [
+      TextSpan(
+        text: '${settings.t('category_label')}: ',
+        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+      ),
+      TextSpan(
+        text: categoryLabel,
+        style: const TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+          color: Colors.black,
+        ),
+      ),
+    ],
+  ),
+),
+
+// Severity (highlight with color)
+RichText(
+  text: TextSpan(
+    children: [
+      TextSpan(
+        text: '${settings.t('severity_label')}: ',
+        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+      ),
+      TextSpan(
+        text: severityLabel,
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+          color: severityColor,
+        ),
+      ),
+    ],
+  ),
+),
+
+// Time
+Text(
+  formattedTime,
+  style: TextStyle(
+    color: Colors.grey.shade600,
+    fontSize: 12,
+  ),
+),
                   ],
                 ),
                 trailing: Row(
@@ -252,7 +332,7 @@ class SosHistoryScreen extends StatelessWidget {
                 onLongPress: status == 'cancelled'
                     ? () => _confirmDeleteCancelledSos(context, sosId)
                     : null,
-              );
+              ));
             },
           );
         },
@@ -271,14 +351,25 @@ class SosHistoryScreen extends StatelessWidget {
     if (!context.mounted) {
       return;
     }
-    final chatExists = chatDoc.exists;
+    final chatData = chatDoc.data();
+    final chatStatus = ((chatData?['status'] as String?) ?? '')
+        .trim()
+        .toLowerCase();
+    final participantUids = (chatData?['participantUids'] as List<dynamic>?)
+            ?.map((uid) => (uid as String?)?.trim() ?? '')
+            .where((uid) => uid.isNotEmpty)
+            .toSet() ??
+        <String>{};
+    final canDeleteChat = chatDoc.exists &&
+        chatStatus == 'cancelled' &&
+        participantUids.contains(currentUserId.trim());
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: Text(chatExists
+            title: Text(canDeleteChat
                 ? settings.t('dialog_delete_cancelled_chat_title')
                 : settings.t('dialog_delete_cancelled_summary_title')),
-            content: Text(chatExists
+            content: Text(canDeleteChat
                 ? settings.t('dialog_delete_cancelled_chat_body')
                 : settings.t('dialog_delete_cancelled_summary_body')),
             actions: <Widget>[
@@ -292,7 +383,7 @@ class SosHistoryScreen extends StatelessWidget {
                   backgroundColor: Colors.red,
                   foregroundColor: Colors.white,
                 ),
-                child: Text(chatExists
+                child: Text(canDeleteChat
                     ? settings.t('button_delete_chat')
                     : settings.t('button_delete_summary')),
               ),
@@ -305,7 +396,7 @@ class SosHistoryScreen extends StatelessWidget {
       return;
     }
 
-    if (chatDoc.exists) {
+    if (canDeleteChat) {
       try {
         await ChatService().deleteEntireChat(
           sosId: sosId,
@@ -339,153 +430,221 @@ class SosHistoryScreen extends StatelessWidget {
     }
   }
 
-  Future<void> _showSosDetails(
-    BuildContext context,
-    Map<String, dynamic> data,
-    String sosId,
-    String status,
-  ) async {
-    final settings = context.read<AppSettingsProvider>();
-    final summary = (data['summary'] as String?)?.trim() ??
-        (data['originalMessage'] as String?)?.trim() ??
-        settings.t('status_no_sos_message_available');
-    final category = (data['category'] as String?)?.trim();
-    final categoryLabel = category == null || category.isEmpty
-        ? settings.t('status_unknown')
-        : _translateCategoryLabel(settings, category);
-    final severity = (data['severity'] as String?)?.trim();
-    final severityLabel = _translateSeverityLabel(settings, severity ?? 'unknown');
-    final address = (data['address'] as String?)?.trim();
-    final location = address ??
-        ((data['latitude'] as num?) != null &&
-                (data['longitude'] as num?) != null
-            ? '${(data['latitude'] as num).toDouble().toStringAsFixed(4)}, ${(data['longitude'] as num).toDouble().toStringAsFixed(4)}'
-            : null);
+Future<void> _showSosDetails(
+  BuildContext context,
+  Map<String, dynamic> data,
+  String sosId,
+  String status,
+) async {
+  final settings = context.read<AppSettingsProvider>();
 
-    final chatDoc =
-        await FirebaseFirestore.instance.collection('chats').doc(sosId).get();
-    if (!context.mounted) {
-      return;
-    }
-    final chatExists = chatDoc.exists;
-    final isActiveStatus = status == 'open' || status == 'active';
+  final summary = (data['summary'] as String?)?.trim() ??
+      (data['originalMessage'] as String?)?.trim() ??
+      settings.t('status_no_sos_message_available');
 
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(settings.t('button_view_sos_history')),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+  final category = (data['category'] as String?)?.trim();
+  final categoryLabel = category == null || category.isEmpty
+      ? settings.t('status_unknown')
+      : _translateCategoryLabel(settings, category);
+
+  final severity = (data['severity'] as String?)?.trim();
+  final severityLabel =
+      _translateSeverityLabel(settings, severity ?? 'unknown');
+
+  final address = (data['address'] as String?)?.trim();
+
+  final location = address ??
+      ((data['latitude'] as num?) != null &&
+              (data['longitude'] as num?) != null
+          ? '${(data['latitude'] as num).toDouble().toStringAsFixed(4)}, ${(data['longitude'] as num).toDouble().toStringAsFixed(4)}'
+          : null);
+
+  final chatDoc = await FirebaseFirestore.instance
+      .collection('chats')
+      .doc(sosId)
+      .get();
+
+  if (!context.mounted) return;
+
+  final chatData = chatDoc.data();
+
+  final chatStatus =
+      ((chatData?['status'] as String?) ?? '').trim().toLowerCase();
+
+  final participantUids =
+      (chatData?['participantUids'] as List<dynamic>?)
+              ?.map((uid) => (uid as String?)?.trim() ?? '')
+              .where((uid) => uid.isNotEmpty)
+              .toSet() ??
+          <String>{};
+
+  final chatExists = chatDoc.exists;
+
+  final canDeleteChat = chatExists &&
+      chatStatus == 'cancelled' &&
+      participantUids.contains(currentUserId.trim());
+
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      return AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        backgroundColor: Colors.white,
+        title: const Text('SOS Details'),
+
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              /// 🔹 Summary
+              Text(
+                summary,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+
+              const SizedBox(height: 16),
+
+              /// 🔹 Info
+              _infoRow(settings.t('label_case_id'), sosId),
+              _infoRow(settings.t('category_label'), categoryLabel),
+              _infoRow(settings.t('severity_label'), severityLabel),
+
+              if (location != null)
+                _infoRow(settings.t('label_location'), location),
+
+              if (status == 'cancelled') ...[
+                const SizedBox(height: 8),
                 Text(
-                  summary,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 12),
-                Text('${settings.t('label_case_id')}: $sosId'),
-                Text(
-                    '${settings.t('status_label')}: ${status == 'cancelled' ? settings.t('status_cancelled') : isActiveStatus ? settings.t('status_active') : settings.t('status_unknown')}'),
-                Text('${settings.t('category_label')}: $categoryLabel'),
-                Text('${settings.t('severity_label')}: $severityLabel'),
-                if (location != null) ...[
-                  const SizedBox(height: 8),
-                  Text('${settings.t('label_location')}: $location'),
-                ],
-                if (status == 'cancelled') ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    settings.t('status_cancelled'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.red.shade700,
-                          fontWeight: FontWeight.bold,
-                        ),
+                  settings.t('status_cancelled'),
+                  style: TextStyle(
+                    color: Colors.red.shade700,
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
-                if (status != 'cancelled' && !chatExists)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12.0),
-                    child: Text(
-                      settings.t('status_chat_summary_preserved'),
-                      style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+
+              if (status != 'cancelled' && !chatExists) ...[
+                const SizedBox(height: 12),
+                Text(
+                  settings.t('status_chat_summary_preserved'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        actionsPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+
+        actions: [
+          /// 🔹 Cancel SOS
+          if (status != 'cancelled')
+            TextButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+
+                final provider =
+                    context.read<EmergencyRequestProvider>();
+
+                final cancelled =
+                    await provider.cancelRequest(sosId);
+
+                if (!context.mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(cancelled
+                        ? settings.t('snackbar_cancel_sos_successful')
+                        : settings.t('snackbar_cancel_sos_failed')),
+                  ),
+                );
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.red.shade700,
+              ),
+              child: Text(settings.t('button_cancel_sos')),
+            ),
+
+          /// 🔹 Open Chat
+          if (status != 'cancelled' && chatExists)
+            FilledButton.icon(
+              icon: const Icon(Icons.chat, size: 18),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => GroupChatScreen(
+                      sosId: sosId,
+                      currentUserId: currentUserId,
+                      currentUserName: currentUserName,
+                      currentUserRole: 'victim',
+                      enableResponderJoinGate: false,
                     ),
                   ),
-              ],
+                );
+              },
+              label: Text(settings.t('button_open_chat')),
+            ),
+
+          /// 🔹 Delete
+          if (status == 'cancelled')
+            FilledButton.icon(
+              icon: const Icon(Icons.delete, size: 18),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade700,
+              ),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _confirmDeleteCancelledSos(context, sosId);
+              },
+              label: Text(chatExists && canDeleteChat
+                  ? settings.t('button_delete_chat')
+                  : settings.t('button_delete_summary')),
+            ),
+
+          /// 🔹 Close
+          TextButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(),
+            child: Text(settings.t('button_close')),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+  Widget _infoRow(String label, String value, {Color? valueColor}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: RichText(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: '$label: ',
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 12,
             ),
           ),
-          actions: <Widget>[
-            if (status != 'cancelled')
-              TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
-                ),
-                onPressed: () async {
-                  Navigator.of(dialogContext).pop();
-                  final provider = context.read<EmergencyRequestProvider>();
-                  final cancelled = await provider.cancelRequest(sosId);
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(cancelled
-                          ? settings.t('snackbar_cancel_sos_successful')
-                          : settings.t('snackbar_cancel_sos_failed')),
-                    ),
-                  );
-                },
-                child: Text(settings.t('button_cancel_sos')),
-              ),
-            if (status != 'cancelled' && chatExists)
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => GroupChatScreen(
-                        sosId: sosId,
-                        currentUserId: currentUserId,
-                        currentUserName: currentUserName,
-                        currentUserRole: 'victim',
-                        enableResponderJoinGate: false,
-                      ),
-                    ),
-                  );
-                },
-                child: Text(settings.t('button_open_chat')),
-              ),
-            if (status == 'cancelled' && chatExists)
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  _confirmDeleteCancelledSos(context, sosId);
-                },
-                child: Text(settings.t('button_delete_chat')),
-              ),
-            if (status == 'cancelled' && !chatExists)
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red.shade700,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  _confirmDeleteCancelledSos(context, sosId);
-                },
-                child: Text(settings.t('button_delete_summary')),
-              ),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(settings.t('button_close')),
+          TextSpan(
+            text: value,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              color: valueColor ?? Colors.black,
             ),
-          ],
-        );
-      },
-    );
-  }
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 }

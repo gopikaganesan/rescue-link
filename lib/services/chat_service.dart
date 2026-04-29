@@ -41,13 +41,45 @@ class ChatService {
     'fire': 'Y107-A8Ny-4',
     'extinguisher': 'PQV71INDaqY',
     'smoke': 'Y107-A8Ny-4',
-    'cpr': 'u0B-ea-_9rc',
-    'cardiac arrest': 'u0B-ea-_9rc',
+    'cpr': 'I6-G04t74_A',
+    'cpr adult': 'I6-G04t74_A',
+    'cpr child': '2-e0m6S3a4s',
+    'cardiac arrest': 'I6-G04t74_A',
+    'heart attack': '5jQ7n1k9R6x',
+    'chest pain': '5jQ7n1k9R6x',
     'bleeding': 'BQNNOh8c8ks',
     'wound': 'BQNNOh8c8ks',
-    'choking': '_zJQUUj2Oo8',
+    'cut': 'BQNNOh8c8ks',
+    'stop bleeding': 'BQNNOh8c8ks',
+    'choking': '3h16_i_P1cQ',
+    'choking adult': '3h16_i_P1cQ',
+    'choking baby': '0eL8b5i9-gU',
+    'heimlich': '3h16_i_P1cQ',
+    'burns': 'eW4y8B_v42s',
+    'scalds': 'eW4y8B_v42s',
+    'fracture': 'iP9Fh8wH1jQ',
+    'broken bone': 'iP9Fh8wH1jQ',
+    'poisoning': '0vW6vUu4Vj4', // St John Ambulance Poisoning (searched common ID)
     'unresponsive': 'ea1RJUOiNfQ',
+    'fainted': 'ea1RJUOiNfQ',
+    'collapsed': 'ea1RJUOiNfQ',
+    'rescue': 'XjMvBW9KDLA',
+    'first aid': 'XjMvBW9KDLA',
+    'drown': 'Aof_O6n28Hw',
+    'water rescue': 'Aof_O6n28Hw',
+    'snake bite': 'T_8N_iEbe00',
+    'seizure': 'Ovsw7tdneqE',
+    'epilepsy': 'Ovsw7tdneqE',
+    'convulsion': 'Ovsw7tdneqE',
+    'stroke': 'vVkaAn4u6Xw',
+    'numbness': 'vVkaAn4u6Xw',
+    'flood': 'VEv_u_I_W_k',
+    'water rising': 'VEv_u_I_W_k',
   };
+
+  /// Returns a set of all unique YouTube video IDs that are considered trusted guides.
+  static Set<String> getTrustedVideoIds() =>
+      _crisisTypeToYoutubeVideoId.values.toSet();
   static const Map<String, List<String>> _quickFallbackByCrisisType =
       <String, List<String>>{
     'medical': <String>[
@@ -601,7 +633,7 @@ class ChatService {
     if (outcome.hasText) {
       finalAiText = _sanitizeYoutubeLinksInAiResponse(
         finalAiText,
-        contextPrompt: '$overviewMessage\nNo human responder has joined yet.',
+        contextPrompt: '$prompt\n$overviewMessage',
       );
     }
     
@@ -1767,7 +1799,9 @@ class ChatService {
     );
     final preferredLanguageLabel = _languageLabelForCode(preferredLanguageCode);
 
-    final trustedVideoIds = _crisisTypeToYoutubeVideoId.values.toSet().join(', ');
+    final videoAllowlistSection = _crisisTypeToYoutubeVideoId.entries
+        .map((e) => '- ${e.key}: ${e.value}')
+        .join('\n');
 
     return '''
 You are RescueLink AI assisting in an emergency group chat.
@@ -1782,11 +1816,13 @@ Use short bullets and clear section labels, but use as many lines as needed to f
 
 CRITICAL CREDIBILITY & VIDEO SAFETY RULE:
 Only provide offline, credible map scenarios and fully verified steps. NEVER hallucinate protocols.
-Only suggest YouTube videos from this EXACT allowlist of verified, playable video IDs: $trustedVideoIds
+Only suggest YouTube videos from this EXACT allowlist of verified, playable video IDs for the corresponding emergency types:
+$videoAllowlistSection
+
 NEVER invent YouTube URLs or video IDs. NEVER suggest untrusted or unavailable videos.
-If the crisis type does not match any trusted video, omit video suggestions entirely.
+If the crisis type does not match any trusted video in the map above, omit video suggestions entirely.
 If the query is about period pain, menstrual cramps, PMS, or routine cycle symptoms, do NOT suggest CPR or trauma-control videos.
-Format video suggestions as: https://www.youtube.com/watch?v=[videoId] where [videoId] is EXACTLY one of: $trustedVideoIds
+Format video suggestions as: https://www.youtube.com/watch?v=[videoId] where [videoId] is EXACTLY one from the map above.
 
 Conversation context:
 - Trigger: $askReason
@@ -2260,29 +2296,36 @@ Complete the full answer before stopping.
 
     final trustedLinksForContext =
         _trustedVisualLinksForPrompt(contextPrompt).toSet();
-    final trustedIds = trustedLinksForContext
+    final keywordTrustedIds = trustedLinksForContext
         .map(
           (url) => RegExp(r'v=([A-Za-z0-9_-]{11})').firstMatch(url)?.group(1),
         )
         .whereType<String>()
         .toSet();
+    
+    // We also trust any ID that is globally defined in our library, 
+    // even if keyword matching didn't trigger for this specific prompt.
+    final globalTrustedIds = _crisisTypeToYoutubeVideoId.values.toSet();
+    final combinedTrustedIds = {...keywordTrustedIds, ...globalTrustedIds};
 
-    // If the context does not map to any trusted video, remove all YouTube links.
-    if (trustedIds.isEmpty) {
+    // If the context does not map to any trusted video, and no global IDs found (unlikely), remove all YouTube links.
+    if (combinedTrustedIds.isEmpty) {
       return text
           .split('\n')
           .map((line) => line
               .replaceAll(
                 RegExp(
-                  r'https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}',
+                  r'^[\s\-*•]*https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}[\s]*$',
                   caseSensitive: false,
+                  multiLine: true,
                 ),
                 '',
               )
               .replaceAll(
                 RegExp(
-                  r'https?:\/\/youtu\.be\/[A-Za-z0-9_-]{11}',
+                  r'^[\s\-*•]*https?:\/\/youtu\.be\/[A-Za-z0-9_-]{11}[\s]*$',
                   caseSensitive: false,
+                  multiLine: true,
                 ),
                 '',
               )
@@ -2307,11 +2350,11 @@ Complete the full answer before stopping.
 
       if (watchMatch != null) {
         final videoId = watchMatch.group(2) ?? '';
-        if (trustedIds.contains(videoId)) {
+        if (combinedTrustedIds.contains(videoId)) {
           // Keep trusted video URL
           sanitized.add(line);
         } else {
-          // Remove untrusted video URL, keep rest of line if any
+          // Remove untrusted video URL
           final beforeUrl = line.substring(0, watchMatch.start).trim();
           final afterUrl = line.substring(watchMatch.end).trim();
           final remainder =
@@ -2322,11 +2365,11 @@ Complete the full answer before stopping.
         }
       } else if (shortMatch != null) {
         final videoId = shortMatch.group(2) ?? '';
-        if (trustedIds.contains(videoId)) {
+        if (combinedTrustedIds.contains(videoId)) {
           // Keep trusted video URL
           sanitized.add(line);
         } else {
-          // Remove untrusted video URL, keep rest of line if any
+          // Remove untrusted video URL
           final beforeUrl = line.substring(0, shortMatch.start).trim();
           final afterUrl = line.substring(shortMatch.end).trim();
           final remainder =

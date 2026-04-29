@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../core/models/emergency_request_model.dart';
 import '../core/models/responder_model.dart';
@@ -25,34 +23,21 @@ class ResponderRequestsScreen extends StatefulWidget {
   const ResponderRequestsScreen({super.key});
 
   @override
-  State<ResponderRequestsScreen> createState() => _ResponderRequestsScreenState();
+  State<ResponderRequestsScreen> createState() =>
+      _ResponderRequestsScreenState();
 }
 
 class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
-  final AudioPlayer _voicePlayer = AudioPlayer();
-  String? _activeVoiceUrl;
-  bool _isVoicePlaying = false;
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refresh();
     });
-
-    _voicePlayer.onPlayerComplete.listen((_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isVoicePlaying = false;
-      });
-    });
   }
 
   @override
   void dispose() {
-    _voicePlayer.dispose();
     super.dispose();
   }
 
@@ -83,6 +68,12 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Signed out successfully.')),
         );
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const AuthScreen(showGuestButton: false),
+          ),
+          (route) => false,
+        );
       },
       onOpenResponderRequests: () {
         Navigator.of(context).pushReplacement(
@@ -92,35 +83,6 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
     );
   }
 
-  Future<void> _openAttachment(String url) async {
-    final uri = Uri.parse(url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open attachment.')),
-      );
-    }
-  }
-
-  Future<void> _toggleRemoteVoicePlayback(String url) async {
-    final isSameTrack = _activeVoiceUrl == url;
-    if (isSameTrack && _isVoicePlaying) {
-      await _voicePlayer.stop();
-      if (mounted) {
-        setState(() {
-          _isVoicePlaying = false;
-        });
-      }
-      return;
-    }
-
-    await _voicePlayer.play(UrlSource(url));
-    if (mounted) {
-      setState(() {
-        _activeVoiceUrl = url;
-        _isVoicePlaying = true;
-      });
-    }
-  }
 
   IconData _severityIcon(String severity) {
     switch (severity.toLowerCase()) {
@@ -220,6 +182,49 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
     );
   }
 
+  Widget _chip(IconData icon, String text, Color color) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(text, style: TextStyle(fontSize: 11, color: color)),
+      ],
+    ),
+  );
+}
+
+Widget _iconChip(IconData icon) {
+  return Container(
+    padding: const EdgeInsets.all(6),
+    decoration: BoxDecoration(
+      color: Colors.grey.shade200,
+      shape: BoxShape.circle,
+    ),
+    child: Icon(icon, size: 14),
+  );
+}
+
+Widget _sectionText(String title, String value) {
+  return Padding(
+    padding: const EdgeInsets.only(top: 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        TranslatedText(value),
+      ],
+    ),
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
@@ -272,333 +277,298 @@ class _ResponderRequestsScreenState extends State<ResponderRequestsScreen> {
           }
         },
         child: Consumer<EmergencyRequestProvider>(
-        builder: (context, provider, _) {
-          if (provider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          builder: (context, provider, _) {
+            if (provider.isLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          if (provider.error != null) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Text(provider.error!),
-              ),
-            );
-          }
+            if (provider.error != null) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text(provider.error!),
+                ),
+              );
+            }
 
-          if (provider.openRequests.isEmpty) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Text('No open requests right now.'),
-              ),
-            );
-          }
+            if (provider.openRequests.isEmpty) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text('No open requests right now.'),
+                ),
+              );
+            }
 
-          return Consumer<LocationProvider>(
-            builder: (context, location, __) {
-              final me = _findCurrentResponder();
-              final visible = me == null
-                  ? provider.openRequests
-                  : provider.openRequests.where((request) {
-                      final shouldNotify = ResponderMatchingService.shouldNotifyResponder(
-                        responder: me,
-                        request: request,
-                      );
-                      final radius = ResponderMatchingService.radiusKmForSeverity(
-                        request.severity,
-                      );
-                      final distance = me.distanceToLocation(
-                        request.latitude,
-                        request.longitude,
-                      );
-                      return shouldNotify && distance <= radius;
-                    }).toList();
+            return Consumer<LocationProvider>(
+              builder: (context, location, __) {
+                final me = _findCurrentResponder();
+                final visible = me == null
+                    ? provider.openRequests
+                    : provider.openRequests.where((request) {
+                        final shouldNotify =
+                            ResponderMatchingService.shouldNotifyResponder(
+                          responder: me,
+                          request: request,
+                        );
+                        final radius =
+                            ResponderMatchingService.radiusKmForSeverity(
+                          request.severity,
+                        );
+                        final distance = me.distanceToLocation(
+                          request.latitude,
+                          request.longitude,
+                        );
+                        return shouldNotify && distance <= radius;
+                      }).toList();
 
-              if (visible.isEmpty) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text('No matching requests near you right now.'),
-                  ),
-                );
-              }
-
-              return ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: visible.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final request = visible[index];
-                  final distance = _distanceKm(request);
-
-                  return Card(
+                if (visible.isEmpty) {
+                  return const Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                _severityIcon(request.severity),
-                                color: _severityColor(request.severity),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  request.requesterName,
-                                  style: Theme.of(context).textTheme.titleMedium,
-                                ),
-                              ),
-                              if (distance != null)
-                                Text(
-                                  '${distance.toStringAsFixed(1)} km',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 6,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.category_outlined, size: 16),
-                                  const SizedBox(width: 4),
-                                  Text(settings.localizedCrisisCategory(request.category)),
-                                ],
-                              ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(_severityIcon(request.severity), size: 16),
-                                  const SizedBox(width: 4),
-                                  Text(request.severity.toUpperCase()),
-                                ],
-                              ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.support_agent, size: 16),
-                                  const SizedBox(width: 4),
-                                  Text(settings.localizedSkill(request.recommendedSkill)),
-                                ],
-                              ),
-                              if (request.attachmentUrl?.isNotEmpty ?? false)
-                                const Icon(Icons.image, size: 18),
-                              if (request.voiceAudioUrl?.isNotEmpty ?? false)
-                                const Icon(Icons.audiotrack, size: 18),
-                              if (request.voiceTranscript?.trim().isNotEmpty ?? false)
-                                const Icon(Icons.subtitles, size: 18),
-                            ],
-                          ),
-                          if (request.forcedCriticalByUser)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                settings.t('manual_override_critical'),
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: Colors.red.shade800,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                            ),
-                          if (request.humanReviewRecommended)
-                            Container(
-                              margin: const EdgeInsets.only(top: 6),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade100,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.orange.shade300),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.psychology_alt_outlined, size: 16),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    settings.t('human_review_recommended'),
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: Colors.orange.shade900,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          const SizedBox(height: 6),
-                          TranslatedText(request.summary),
-                          ExpansionTile(
-                            tilePadding: EdgeInsets.zero,
-                            childrenPadding: const EdgeInsets.only(bottom: 8),
-                            title: Text(settings.t('view_details_and_media')),
-                            children: [
-                              if (request.originalMessage.trim().isNotEmpty) ...[
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    settings.t('reporter_message'),
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: TranslatedText(request.originalMessage),
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                              if (request.voiceTranscript?.trim().isNotEmpty ?? false) ...[
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    settings.t('voice_transcript'),
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: TranslatedText(request.voiceTranscript!),
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                              if (request.attachmentUrl?.isNotEmpty ?? false) ...[
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      OutlinedButton.icon(
-                                        onPressed: () => _openAttachment(request.attachmentUrl!),
-                                        icon: const Icon(Icons.image_outlined),
-                                        label: Text(settings.t('open_image')),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (request.attachmentType == 'image') ...[
-                                  const SizedBox(height: 6),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(
-                                      request.attachmentUrl!,
-                                      height: 180,
-                                      width: double.infinity,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Row(
-                                        children: [
-                                          const Icon(Icons.broken_image_outlined),
-                                          const SizedBox(width: 6),
-                                          Expanded(
-                                            child: Text(
-                                              settings.t('image_unavailable_preview'),
-                                              style: Theme.of(context).textTheme.bodySmall,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 8),
-                              ],
-                              if (request.voiceAudioUrl?.isNotEmpty ?? false) ...[
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      OutlinedButton.icon(
-                                        onPressed: () => _toggleRemoteVoicePlayback(request.voiceAudioUrl!),
-                                        icon: Icon(
-                                          (_activeVoiceUrl == request.voiceAudioUrl && _isVoicePlaying)
-                                              ? Icons.stop
-                                              : Icons.play_arrow,
-                                        ),
-                                        label: Text(
-                                          (_activeVoiceUrl == request.voiceAudioUrl && _isVoicePlaying)
-                                              ? settings.t('stop_audio')
-                                              : settings.t('play_audio'),
-                                        ),
-                                      ),
-                                      TextButton.icon(
-                                        onPressed: () => _openAttachment(request.voiceAudioUrl!),
-                                        icon: const Icon(Icons.open_in_new),
-                                        label: Text(settings.t('open_external')),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              if (request.suggestedActions.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    settings.t('recommended_actions'),
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                ...request.suggestedActions.take(4).map(
-                                      (action) => Padding(
-                                        padding: const EdgeInsets.only(top: 2),
-                                        child: Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: <Widget>[
-                                            const Text('• '),
-                                            Expanded(child: TranslatedText(action)),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                              ],
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () => _navigateInApp(request),
-                                  icon: const Icon(Icons.navigation),
-                                  label: Text(settings.t('navigate')),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _accept(request),
-                                  icon: const Icon(Icons.check),
-                                  label: Text(settings.t('button_accept')),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                      padding: EdgeInsets.all(20),
+                      child: Text('No matching requests near you right now.'),
                     ),
                   );
-                },
-              );
-            },
-          );
-        },
-      ),
+                }
+
+                return ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: visible.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final request = visible[index];
+                    final distance = _distanceKm(request);
+
+                    return Container(
+  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  decoration: BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(18),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.05),
+        blurRadius: 10,
+      )
+    ],
+    border: Border.all(
+      color: request.severity == 'critical'
+          ? Colors.red.shade300
+          : Colors.grey.shade200,
+      width: 1.2,
     ),
+  ),
+  child: Padding(
+    padding: const EdgeInsets.all(14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+
+        /// 🔴 HEADER
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: _severityColor(request.severity).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _severityIcon(request.severity),
+                color: _severityColor(request.severity),
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 10),
+
+            Expanded(
+              child: Text(
+                request.requesterName,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+
+            if (distance != null)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${distance.toStringAsFixed(1)} km',
+                  style: const TextStyle(fontSize: 11),
+                ),
+              ),
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        /// 🧩 TAGS (modern chips)
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+
+            _chip(Icons.category_outlined,
+                settings.localizedCrisisCategory(request.category),
+                Colors.blue),
+
+            _chip(_severityIcon(request.severity),
+                request.severity.toUpperCase(),
+                _severityColor(request.severity)),
+
+            _chip(Icons.support_agent,
+                settings.localizedSkill(request.recommendedSkill),
+                Colors.purple),
+
+            if (request.attachmentUrl?.isNotEmpty ?? false)
+              _iconChip(Icons.image),
+
+            if (request.voiceAudioUrl?.isNotEmpty ?? false)
+              _iconChip(Icons.audiotrack),
+
+            if (request.voiceTranscript?.trim().isNotEmpty ?? false)
+              _iconChip(Icons.subtitles),
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        /// 💬 SUMMARY
+        TranslatedText(request.summary),
+
+        /// ⚠️ WARNINGS
+        if (request.forcedCriticalByUser)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              settings.t('manual_override_critical'),
+              style: TextStyle(
+                color: Colors.red.shade800,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+          ),
+
+        if (request.humanReviewRecommended)
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade100,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.psychology_alt, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  settings.t('human_review_recommended'),
+                  style: TextStyle(
+                    color: Colors.orange.shade900,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        /// 📂 EXPANDABLE DETAILS
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text(
+            settings.t('view_details_and_media'),
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          children: [
+            if (request.originalMessage.trim().isNotEmpty)
+              _sectionText(settings.t('reporter_message'),
+                  request.originalMessage),
+
+            if (request.voiceTranscript?.trim().isNotEmpty ?? false)
+              _sectionText(settings.t('voice_transcript'),
+                  request.voiceTranscript!),
+
+            if (request.attachmentUrl?.isNotEmpty ?? false) ...[
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.network(
+                  request.attachmentUrl!,
+                  height: 180,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ],
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        /// 🔘 ACTIONS
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _navigateInApp(request),
+                icon: const Icon(Icons.navigation, size: 18),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(settings.t('navigate')),
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  backgroundColor: Colors.grey.shade100,
+                  foregroundColor: Colors.red,
+                  side: BorderSide(color: Colors.red.shade300),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _accept(request),
+                icon: const Icon(Icons.check, size: 18),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(settings.t('button_accept')),
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  backgroundColor: Colors.red,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  ),
+);
+                  },
+                );
+              },
+            );
+          },
+        ),
+      ),
       bottomNavigationBar: FixedFooterNavigationBar(
         activeIndex: 1,
         onSosTap: () {

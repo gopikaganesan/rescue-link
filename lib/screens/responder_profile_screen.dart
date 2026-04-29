@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 import '../core/models/responder_model.dart';
 import '../core/providers/app_settings_provider.dart';
 import '../core/utils/chat_message_utils.dart';
-
+import '../core/providers/auth_provider.dart';
 class ResponderProfileScreen extends StatefulWidget {
   final ResponderModel responder;
   final double? viewerLatitude;
@@ -120,42 +120,95 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
       return;
     }
 
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(
-            settings.t('profile_review_title').replaceAll(
-              '{name}',
-              settings.localizedDisplayName(widget.responder.name),
-            ),
+await showDialog<void>(
+  context: context,
+  barrierColor: Colors.black54,
+  builder: (ctx) => StatefulBuilder(
+    builder: (ctx, setDialogState) {
+      return Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            color: Theme.of(context).colorScheme.surface,
           ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(settings.t('profile_give_rating_review')),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(5, (i) {
-                    return IconButton(
-                      icon: Icon(
-                        i < selectedRating ? Icons.star : Icons.star_border,
-                        color: Colors.amber,
-                        size: 34,
-                      ),
-                      onPressed: isSubmitting
-                          ? null
-                          : () {
-                              setDialogState(() => selectedRating = i + 1.0);
-                            },
-                    );
-                  }),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+
+              /// 🧑 Title
+              Text(
+                settings.t('profile_review_title').replaceAll(
+                  '{name}',
+                  settings.localizedDisplayName(widget.responder.name),
                 ),
-                const SizedBox(height: 8),
-                TextFormField(
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+
+              const SizedBox(height: 6),
+
+              /// Subtitle
+              Text(
+                settings.t('profile_give_rating_review'),
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 13,
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              /// ⭐ Rating (modern style)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: List.generate(5, (i) {
+                  final isSelected = i < selectedRating;
+
+                  return GestureDetector(
+                    onTap: isSubmitting
+                        ? null
+                        : () {
+                            setDialogState(() {
+                              selectedRating = i + 1.0;
+                            });
+                          },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.amber.withOpacity(0.15)
+                            : Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.star,
+                        size: 32,
+                        color: isSelected
+                            ? Colors.amber
+                            : Colors.grey.shade400,
+                      ),
+                    ),
+                  );
+                }),
+              ),
+
+              const SizedBox(height: 16),
+
+              /// ✍️ Review input
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: TextFormField(
                   initialValue: reviewText,
                   onChanged: (value) {
                     reviewText = value;
@@ -164,115 +217,156 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                   maxLines: 4,
                   maxLength: 400,
                   enabled: !isSubmitting,
+                  style: const TextStyle(fontSize: 14),
                   decoration: InputDecoration(
                     hintText: settings.t('profile_share_experience'),
-                    border: OutlineInputBorder(),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.all(12),
                   ),
                 ),
-              ],
-            ),
-          ),
-          actions: [
-            if (hasExistingReview)
-              TextButton(
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
-                onPressed: isSubmitting
-                    ? null
-                    : () async {
-                        if (!ctx.mounted) {
-                          return;
-                        }
-                        setDialogState(() {
-                          isSubmitting = true;
-                        });
-                        try {
-                          await reviewRef.delete();
-                        } catch (e) {
-                          if (ctx.mounted) {
-                            setDialogState(() {
-                              isSubmitting = false;
-                            });
-                          }
-                          if (mounted) {
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text('${settings.t('profile_unable_delete_review')}$e'),
-                              ),
-                            );
-                          }
-                          return;
-                        }
-                        if (!ctx.mounted) {
-                          return;
-                        }
-                        Navigator.pop(ctx);
-                        if (mounted) {
-                          messenger.showSnackBar(
-                            SnackBar(content: Text(settings.t('profile_review_deleted'))),
-                          );
-                        }
-                      },
-                child: Text(settings.t('menu_delete_chat')),
               ),
-            TextButton(
-              onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
-              child: Text(settings.t('profile_cancel')),
-            ),
-            FilledButton(
-              onPressed: isSubmitting ||
-                      (selectedRating <= 0 && reviewText.trim().isEmpty)
-                  ? null
-                  : () async {
-                      if (!ctx.mounted) {
-                        return;
-                      }
-                      setDialogState(() {
-                        isSubmitting = true;
-                      });
-                      final updatePayload = <String, dynamic>{
-                        'reviewerUid': currentUserId,
-                        'reviewerName': widget.currentUserName ?? settings.t('name_anonymous'),
-                        'responderUid': widget.responder.id,
-                        'responderName': widget.responder.name,
-                        'review': reviewText.trim(),
-                        'updatedAt': FieldValue.serverTimestamp(),
-                      };
-                      if (selectedRating > 0) {
-                        updatePayload['rating'] = selectedRating;
-                      }
-                      try {
-                        await reviewRef.set(updatePayload, SetOptions(merge: true));
-                      } catch (e) {
-                        if (ctx.mounted) {
-                          setDialogState(() {
-                            isSubmitting = false;
-                          });
-                        }
-                        if (mounted) {
-                          messenger.showSnackBar(
-                            SnackBar(
-                              content: Text('${settings.t('profile_unable_save_review')}$e'),
-                            ),
-                          );
-                        }
-                        return;
-                      }
-                      if (!ctx.mounted) {
-                        return;
-                      }
-                      Navigator.pop(ctx);
-                      if (mounted) {
-                        messenger.showSnackBar(
-                          SnackBar(content: Text(settings.t('profile_review_saved'))),
-                        );
-                      }
-                    },
-              child: Text(settings.t('profile_save_review')),
-            ),
-          ],
+
+              const SizedBox(height: 18),
+
+              /// 🔘 Actions (modern buttons)
+              Row(
+                children: [
+                  /// Delete (if exists)
+                  if (hasExistingReview)
+                    Expanded(
+                      child: TextButton(
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                setDialogState(() => isSubmitting = true);
+                                try {
+                                  await reviewRef.delete();
+                                } catch (e) {
+                                  setDialogState(() => isSubmitting = false);
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        '${settings.t('profile_unable_delete_review')}$e',
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                Navigator.pop(ctx);
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      settings.t('profile_review_deleted'),
+                                    ),
+                                  ),
+                                );
+                              },
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red,
+                        ),
+                        child: const Text('Delete'),
+                      ),
+                    ),
+
+                  if (hasExistingReview) const SizedBox(width: 8),
+
+                  /// Save
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: isSubmitting ||
+                              (selectedRating <= 0 &&
+                                  reviewText.trim().isEmpty)
+                          ? null
+                          : () async {
+                              setDialogState(() => isSubmitting = true);
+
+                              final updatePayload = {
+                                'reviewerUid': currentUserId,
+                                'reviewerName':
+                                    widget.currentUserName ??
+                                        settings.t('name_anonymous'),
+                                'responderUid': widget.responder.id,
+                                'responderName': widget.responder.name,
+                                'review': reviewText.trim(),
+                                'updatedAt':
+                                    FieldValue.serverTimestamp(),
+                              };
+
+                              if (selectedRating > 0) {
+                                updatePayload['rating'] =
+                                    selectedRating;
+                              }
+
+                              try {
+                                await reviewRef.set(
+                                  updatePayload,
+                                  SetOptions(merge: true),
+                                );
+                              } catch (e) {
+                                setDialogState(
+                                    () => isSubmitting = false);
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      '${settings.t('profile_unable_save_review')}$e',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+
+                              Navigator.pop(ctx);
+                              messenger.showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    settings.t('profile_review_saved'),
+                                  ),
+                                ),
+                              );
+                            },
+                      style: ElevatedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: isSubmitting
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              /// Cancel
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed:
+                      isSubmitting ? null : () => Navigator.pop(ctx),
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(settings.t('profile_cancel')),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    },
+  ),
+);
   }
 
 
@@ -284,11 +378,18 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
   ) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.red.shade100),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+          border: Border.all(color: Colors.grey.shade100),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -307,6 +408,10 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
+    final auth = context.watch<AuthProvider>();
+    final currentUserId = widget.currentUserId ?? auth.currentUser?.id;
+    final isCurrentUserProfile = widget.isCurrentUserProfile || (currentUserId == widget.responder.id);
+
     final isAi = widget.responder.id == 'rescuelink_ai';
     final responderDisplayName = isAi
         ? settings.t('chat_rescue_link_ai')
@@ -318,9 +423,9 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isCurrentUserProfile
+          isCurrentUserProfile
               ? settings.t('profile_my_responder_profile')
-              : (isAi ? settings.t('profile_ai_assistant') : settings.t('profile_responder_profile')),
+              : (isAi ? settings.t('profile_ai_assistant') : settings.t('profile_responder_profile')),style:const TextStyle(fontWeight:FontWeight.bold),
         ),
       ),
       body: StreamBuilder<QuerySnapshot>(
@@ -353,7 +458,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: isAi 
-                        ? [Colors.blue.shade800, Colors.blue.shade500] 
+                        ? [Colors.red.shade900, Colors.red.shade600] 
                         : [Colors.red.shade700, Colors.red.shade400],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -486,7 +591,7 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                         ),
                   ),
                   const SizedBox(height: 12),
-                  if (widget.isCurrentUserProfile)
+                  if (isCurrentUserProfile)
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -497,24 +602,38 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                       child: Text(settings.t('profile_this_is_your_view')),
                     )
                   else
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
+                    Row(
                       children: [
-                        SizedBox(
-                          width: 160,
+                        Expanded(
                           child: ElevatedButton.icon(
                             onPressed: () => _callResponder(context),
                             icon: const Icon(Icons.call),
                             label: Text(settings.t('profile_call')),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              backgroundColor: Colors.red.shade600,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              elevation: 2,
+                            ),
                           ),
                         ),
-                        SizedBox(
-                          width: 160,
+                        const SizedBox(width: 12),
+                        Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () => _messageResponder(context),
                             icon: const Icon(Icons.message),
                             label: Text(settings.t('profile_message')),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              foregroundColor: Colors.red.shade700,
+                              side: BorderSide(color: Colors.red.shade400, width: 1.5),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -522,22 +641,27 @@ class _ResponderProfileScreenState extends State<ResponderProfileScreen> {
                 ],
                 const SizedBox(height: 24),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      settings.t('profile_community_reviews'),
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    if (!widget.isCurrentUserProfile && widget.currentUserId != null)
-                      TextButton.icon(
-                        onPressed: _showReviewAndRatingDialog,
-                        icon: const Icon(Icons.add_reaction_outlined),
-                        label: Text(settings.t('profile_rate_review')),
-                      ),
-                  ],
-                ),
+  children: [
+    Expanded(
+      child: Text(
+        settings.t('profile_community_reviews'),
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+        overflow: TextOverflow.ellipsis, // ✅ prevents overflow
+      ),
+    ),
+    if (!isCurrentUserProfile && currentUserId != null)
+      TextButton.icon(
+        onPressed: _showReviewAndRatingDialog,
+        icon: const Icon(Icons.add_reaction_outlined, color: Colors.red),
+        label: Text(
+          settings.t('profile_rate_review'),
+          style: const TextStyle(color: Colors.red),
+        ),
+      ),
+  ],
+),
                 const SizedBox(height: 12),
                 if (reviewData.isEmpty)
                   Container(
