@@ -78,6 +78,6 @@ See [docs/SETUP_KEYS.md](docs/SETUP_KEYS.md) for full configuration details.
 - [**Architecture & Process**](docs/PROCESS_FLOW_ARCHITECTURE.md): End-to-end system sequence diagrams.
 
 ## 📽️ Submission
-- **Demo Video**: [Link coming soon]
-- **Project Deck**: [Link coming soon]
-- **APK Download**: [Link coming soon]
+- **Demo Video**: [View Video Submission](https://drive.google.com/file/d/1L-Teto2HTqUZojNKSAckQrql-mkP34c_/view?usp=sharing)
+- **Project Deck**: [View Presentation](https://docs.google.com/presentation/d/1dF7Z5kIO16d57KnYnjUvzvR3bAGUVEt_NDZhdrI4xbY/edit?usp=sharing)
+- **APK Download**: [View Instruction to download](https://drive.google.com/file/d/1PG_ftrg_xwTtuchIMSzOpu6y92HnGbV_/view?usp=drive_link)
